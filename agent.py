@@ -79,6 +79,10 @@ TOOLS = [
                     "type": "string",
                     "description": "Nombre o teléfono de quien registra. Opcional.",
                 },
+                "forzar_registro": {
+                    "type": "boolean",
+                    "description": "Si es true, registra aunque exista un duplicado reciente. Usar solo cuando el usuario confirmó explícitamente.",
+                },
             },
             "required": ["nombre_obra", "tipo", "monto", "moneda", "descripcion"],
         },
@@ -248,6 +252,62 @@ TOOLS = [
         },
     },
     {
+        "name": "generar_informe",
+        "description": (
+            "Genera un informe financiero de una obra con totales por moneda, "
+            "desglose de egresos por rubro con porcentajes y comparativas. "
+            "Usá esta herramienta cuando el usuario pida un resumen, informe o reporte."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre_obra": {
+                    "type": "string",
+                    "description": "Nombre (o parte del nombre) de la obra.",
+                },
+                "fecha_desde": {
+                    "type": "string",
+                    "description": "Fecha inicio en formato YYYY-MM-DD. Opcional.",
+                },
+                "fecha_hasta": {
+                    "type": "string",
+                    "description": "Fecha fin en formato YYYY-MM-DD. Opcional.",
+                },
+            },
+            "required": ["nombre_obra"],
+        },
+    },
+    {
+        "name": "exportar_movimientos",
+        "description": (
+            "Genera un link de descarga CSV con todos los movimientos de una obra. "
+            "El link puede abrirse desde el celular para descargar el archivo y abrirlo en Excel o Google Sheets."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre_obra": {
+                    "type": "string",
+                    "description": "Nombre (o parte del nombre) de la obra.",
+                },
+                "fecha_desde": {
+                    "type": "string",
+                    "description": "Fecha inicio en formato YYYY-MM-DD. Opcional.",
+                },
+                "fecha_hasta": {
+                    "type": "string",
+                    "description": "Fecha fin en formato YYYY-MM-DD. Opcional.",
+                },
+                "moneda": {
+                    "type": "string",
+                    "enum": ["ARS", "USD", "digital"],
+                    "description": "Filtrar por moneda. Opcional.",
+                },
+            },
+            "required": ["nombre_obra"],
+        },
+    },
+    {
         "name": "crear_obra",
         "description": (
             "Crea una nueva obra (proyecto de construcción) en el sistema. "
@@ -322,6 +382,28 @@ def ejecutar_herramienta(nombre: str, params: dict) -> str:
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
                 return f"❌ No encontré ninguna obra con el nombre '{params['nombre_obra']}'. ¿Podés verificar el nombre?"
+
+            # Detección de duplicados (salvo que el usuario ya confirmó)
+            if not params.get("forzar_registro"):
+                duplicados = db.detectar_duplicado(
+                    obra_id=obra["id"],
+                    monto=params["monto"],
+                    moneda=params["moneda"],
+                    tipo=params["tipo"],
+                )
+                if duplicados:
+                    dup = duplicados[0]
+                    registrado_por = dup.get("registrado_por") or "alguien del equipo"
+                    return (
+                        f"⚠️ *Posible duplicado detectado*\n"
+                        f"Hay un movimiento similar registrado hace menos de 2 horas:\n"
+                        f"  • {dup['tipo'].capitalize()} de {dup['monto']} {dup['moneda']}\n"
+                        f"  • Concepto: {dup.get('descripcion', '—')}\n"
+                        f"  • Registrado por: {registrado_por}\n\n"
+                        f"¿Es un movimiento nuevo o es el mismo? "
+                        f"Respondé *'sí, registralo igual'* para confirmarlo."
+                    )
+
             resultado = db.registrar_movimiento(
                 obra_id=obra["id"],
                 tipo=params["tipo"],
@@ -520,6 +602,102 @@ def ejecutar_herramienta(nombre: str, params: dict) -> str:
                 )
             return "\n\n".join(lineas)
 
+        elif nombre == "generar_informe":
+            obra = db.buscar_obra_por_nombre(params["nombre_obra"])
+            if not obra:
+                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+            informe = db.generar_informe_financiero(
+                obra_id=obra["id"],
+                fecha_desde=params.get("fecha_desde"),
+                fecha_hasta=params.get("fecha_hasta"),
+            )
+            if informe["total_movimientos"] == 0:
+                return f"No hay movimientos registrados en *{obra['nombre']}*."
+
+            lineas = [f"📊 *Informe financiero — {obra['nombre']}*"]
+            periodo = ""
+            if informe.get("fecha_desde") or informe.get("fecha_hasta"):
+                desde = informe.get("fecha_desde", "inicio")
+                hasta = informe.get("fecha_hasta", "hoy")
+                periodo = f" ({desde} → {hasta})"
+            lineas[0] += periodo + "\n"
+
+            # Totales por moneda
+            for moneda, datos in informe["por_moneda"].items():
+                sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+                lineas.append(
+                    f"*{moneda}*\n"
+                    f"  Ingresos: {sym} {datos['ingresos']:,.2f}\n"
+                    f"  Egresos:  {sym} {datos['egresos']:,.2f}\n"
+                    f"  Saldo:    {sym} {datos['saldo']:,.2f}"
+                )
+
+            # Desglose de egresos por rubro (con barra visual y porcentaje)
+            if informe["por_rubro"]:
+                lineas.append("\n📂 *Egresos por rubro:*")
+                for moneda in informe["por_moneda"]:
+                    sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+                    total_egresos = informe["por_moneda"][moneda]["egresos"]
+                    if total_egresos == 0:
+                        continue
+                    rubros_moneda = [
+                        (rubro, montos[moneda])
+                        for rubro, montos in informe["por_rubro"].items()
+                        if moneda in montos
+                    ]
+                    rubros_moneda.sort(key=lambda x: x[1], reverse=True)
+                    if rubros_moneda:
+                        lineas.append(f"_{moneda}_")
+                        for rubro, monto in rubros_moneda:
+                            pct = (monto / total_egresos) * 100
+                            barras = int(pct / 10)
+                            barra_str = "█" * barras + "░" * (10 - barras)
+                            lineas.append(
+                                f"  {rubro[:18]:<18} {barra_str} {pct:.0f}%\n"
+                                f"  {' '*18} {sym} {monto:,.2f}"
+                            )
+
+            lineas.append(f"\n_Total: {informe['total_movimientos']} movimientos_")
+            return "\n".join(lineas)
+
+        elif nombre == "exportar_movimientos":
+            obra = db.buscar_obra_por_nombre(params["nombre_obra"])
+            if not obra:
+                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+
+            base_url = os.environ.get(
+                "RAILWAY_PUBLIC_DOMAIN",
+                "web-production-73e40.up.railway.app"
+            )
+            if not base_url.startswith("http"):
+                base_url = f"https://{base_url}"
+
+            import urllib.parse
+            query: dict = {"obra": obra["nombre"]}
+            if params.get("fecha_desde"):
+                query["desde"] = params["fecha_desde"]
+            if params.get("fecha_hasta"):
+                query["hasta"] = params["fecha_hasta"]
+            if params.get("moneda"):
+                query["moneda"] = params["moneda"]
+
+            url = f"{base_url}/export/movimientos?{urllib.parse.urlencode(query)}"
+
+            filtros = []
+            if params.get("fecha_desde") or params.get("fecha_hasta"):
+                filtros.append(f"{params.get('fecha_desde','inicio')} → {params.get('fecha_hasta','hoy')}")
+            if params.get("moneda"):
+                filtros.append(params["moneda"])
+            filtros_str = " · ".join(filtros) if filtros else "todos los movimientos"
+
+            return (
+                f"📥 *Exportar movimientos — {obra['nombre']}*\n"
+                f"Filtros: {filtros_str}\n\n"
+                f"Abrí este link desde tu celular o computadora para descargar el CSV:\n"
+                f"{url}\n\n"
+                f"_El archivo se puede abrir en Excel o Google Sheets._"
+            )
+
         else:
             return f"Herramienta desconocida: {nombre}"
 
@@ -542,6 +720,8 @@ Podés ayudar con:
 - Registrar aportes y retiros de inversores
 - Ver la cuenta corriente de cada inversor
 - Registrar y comparar presupuestos de proveedores
+- Generar informes financieros con totales por moneda, desglose por rubro y porcentajes
+- Exportar movimientos como CSV descargable (link de descarga para Excel o Google Sheets)
 
 Reglas importantes:
 1. Siempre respondé en español argentino, de forma amigable y concisa (esto es WhatsApp).
@@ -553,6 +733,9 @@ Reglas importantes:
 6. Nunca inventes datos que no tenés. Si no encontrás algo en la base de datos, decilo claramente.
 7. Los montos siempre con separador de miles (punto) y dos decimales cuando corresponda.
 8. Las fechas en formato día/mes/año para mostrar al usuario.
+9. Detección de duplicados: si el sistema detecta un movimiento similar reciente, informá al usuario
+   y esperá su confirmación antes de registrar. Si el usuario confirma con "sí registralo" o similar,
+   volvé a llamar registrar_movimiento con forzar_registro=true.
 """
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
