@@ -36,6 +36,74 @@ def listar_obras(solo_activas: bool = True) -> list[dict]:
     return q.execute().data
 
 
+def detectar_duplicado(obra_id: str, monto: float, moneda: str, tipo: str, horas: int = 2) -> list[dict]:
+    """Busca movimientos idénticos en las últimas N horas para detectar duplicados."""
+    db = get_client()
+    from datetime import datetime, timedelta
+    fecha_limite = (datetime.utcnow() - timedelta(hours=horas)).isoformat()
+    res = (
+        db.table("movimientos")
+        .select("id, monto, moneda, tipo, descripcion, fecha, registrado_por")
+        .eq("obra_id", obra_id)
+        .eq("monto", str(monto))
+        .eq("moneda", moneda)
+        .eq("tipo", tipo)
+        .gte("created_at", fecha_limite)
+        .execute()
+    )
+    return res.data
+
+
+def generar_informe_financiero(
+    obra_id: str,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+) -> dict:
+    """Genera un informe financiero con totales, porcentajes y desglose por rubro."""
+    db = get_client()
+    q = (
+        db.table("movimientos")
+        .select("tipo, monto, moneda, descripcion, fecha, rubros(nombre)")
+        .eq("obra_id", obra_id)
+        .order("fecha", desc=False)
+    )
+    if fecha_desde:
+        q = q.gte("fecha", fecha_desde)
+    if fecha_hasta:
+        q = q.lte("fecha", fecha_hasta)
+    movimientos = q.execute().data
+
+    from collections import defaultdict
+    por_moneda: dict = {}
+    por_rubro: dict = defaultdict(lambda: defaultdict(float))
+
+    for m in movimientos:
+        moneda = m["moneda"]
+        monto = float(m["monto"])
+        tipo = m["tipo"]
+        rubro_data = m.get("rubros")
+        rubro_nombre = rubro_data["nombre"] if rubro_data else "Sin rubro"
+
+        if moneda not in por_moneda:
+            por_moneda[moneda] = {"ingresos": 0.0, "egresos": 0.0}
+        if tipo == "ingreso":
+            por_moneda[moneda]["ingresos"] += monto
+        else:
+            por_moneda[moneda]["egresos"] += monto
+            por_rubro[rubro_nombre][moneda] += monto
+
+    for moneda, data in por_moneda.items():
+        data["saldo"] = data["ingresos"] - data["egresos"]
+
+    return {
+        "por_moneda": por_moneda,
+        "por_rubro": {k: dict(v) for k, v in por_rubro.items()},
+        "total_movimientos": len(movimientos),
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+    }
+
+
 def buscar_obra_por_nombre(nombre: str) -> Optional[dict]:
     """Búsqueda flexible: devuelve la primera obra cuyo nombre contenga el texto."""
     db = get_client()
