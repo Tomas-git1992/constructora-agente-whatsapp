@@ -248,6 +248,36 @@ TOOLS = [
         },
     },
     {
+        "name": "crear_obra",
+        "description": (
+            "Crea una nueva obra (proyecto de construcción) en el sistema. "
+            "Usá esta herramienta cuando el usuario quiera dar de alta una obra nueva. "
+            "Pedí confirmación antes de crear si no tenés todos los datos."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre": {
+                    "type": "string",
+                    "description": "Nombre de la obra. Requerido.",
+                },
+                "descripcion": {
+                    "type": "string",
+                    "description": "Descripción breve de la obra. Opcional.",
+                },
+                "direccion": {
+                    "type": "string",
+                    "description": "Dirección física de la obra. Opcional.",
+                },
+                "fecha_inicio": {
+                    "type": "string",
+                    "description": "Fecha de inicio en formato YYYY-MM-DD. Default: hoy.",
+                },
+            },
+            "required": ["nombre"],
+        },
+    },
+    {
         "name": "comparar_presupuestos",
         "description": (
             "Compara presupuestos de distintos proveedores para una obra y/o rubro. "
@@ -418,6 +448,27 @@ def ejecutar_herramienta(nombre: str, params: dict) -> str:
                 )
             return "\n\n".join(lineas)
 
+        elif nombre == "crear_obra":
+            from datetime import date
+            obra_existente = db.buscar_obra_por_nombre(params["nombre"])
+            if obra_existente:
+                return (
+                    f"⚠️ Ya existe una obra llamada *{obra_existente['nombre']}* "
+                    f"(estado: {obra_existente['estado']}). ¿Querés crear una con nombre diferente?"
+                )
+            nueva_obra = db.crear_obra(
+                nombre=params["nombre"],
+                descripcion=params.get("descripcion", ""),
+                direccion=params.get("direccion", ""),
+                fecha_inicio=params.get("fecha_inicio", date.today().isoformat()),
+            )
+            return (
+                f"🏗️ *Obra creada exitosamente*\n"
+                f"Nombre: {nueva_obra['nombre']}\n"
+                f"Dirección: {nueva_obra.get('direccion') or 'No indicada'}\n"
+                f"Estado: {nueva_obra.get('estado', 'activa')}"
+            )
+
         elif nombre == "registrar_presupuesto":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
@@ -485,6 +536,7 @@ Tu rol es ayudar al equipo a registrar y consultar información financiera de la
 rápida y simple a través de WhatsApp.
 
 Podés ayudar con:
+- Crear nuevas obras (proyectos de construcción)
 - Registrar ingresos y egresos en la caja de cada obra (en pesos, dólares o medios digitales)
 - Consultar saldos y movimientos por obra
 - Registrar aportes y retiros de inversores
