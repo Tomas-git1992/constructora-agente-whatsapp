@@ -107,7 +107,7 @@ def generar_informe_financiero(
 def buscar_obra_por_nombre(nombre: str) -> Optional[dict]:
     """Búsqueda flexible: devuelve la primera obra cuyo nombre contenga el texto."""
     db = get_client()
-    res = db.table("obras").select("*").ilike("nombre", f"%{nombre}%").limit(1).execute()
+  2 res = db.table("obras").select("*").ilike("nombre", f"%{nombre}%").limit(1).execute()
     return res.data[0] if res.data else None
 
 
@@ -371,3 +371,248 @@ def obtener_historial(telefono: str, limite: int = 10) -> list[dict]:
     )
     # Devolver en orden cronológico
     return list(reversed(res.data))
+
+
+# ──────────────────────────────────────────────
+# PRESUPUESTO POR OBRA
+# ──────────────────────────────────────────────
+
+def obtener_presupuesto_obra(obra_id: str) -> dict:
+    """Devuelve presupuesto_total, moneda_presupuesto y gasto actual de la obra."""
+    db = get_client()
+    obra = db.table("obras").select(
+        "id, nombre, presupuesto_total, moneda_presupuesto"
+    ).eq("id", obra_id).single().execute()
+
+    if not obra.data:
+        return {}
+
+    presupuesto = float(obra.data.get("presupuesto_total") or 0)
+    moneda = obra.data.get("moneda_presupuesto") or "ARS"
+
+    # Calcular gasto real en esa moneda
+    movs = (
+        db.table("movimientos")
+        .select("monto")
+        .eq("obra_id", obra_id)
+        .eq("tipo", "egreso")
+        .eq("moneda", moneda)
+        .execute()
+    )
+    gastado = sum(float(m["monto"]) for m in movs.data)
+    porcentaje = round((gastado / presupuesto * 100), 1) if presupuesto > 0 else 0
+
+    return {
+        "nombre": obra.data["nombre"],
+        "presupuesto_total": presupuesto,
+        "moneda": moneda,
+        "gastado": gastado,
+        "disponible": presupuesto - gastado,
+        "porcentaje_ejecutado": porcentaje,
+    }
+
+
+def actualizar_presupuesto_obra(obra_id: str, presupuesto_total: float, moneda: str = "ARS") -> dict:
+    """Establece o actualiza el presupuesto total de una obra."""
+    db = get_client()
+    res = db.table("obras").update({
+        "presupuesto_total": presupuesto_total,
+        "moneda_presupuesto": moneda,
+    }).eq("id", obra_id).execute()
+    return res.data[0] if res.data else {}
+
+
+# ──────────────────────────────────────────────
+# INFORME DE CIERRE DETALLADO
+# ──────────────────────────────────────────────
+
+# Rubros que se consideran "mano de obra"
+RUBROS_MANO_DE_OBRA = {"mano de obra", "personal", "sueldos", "jornales", "honorarios"}
+
+
+def generar_informe_cierre(obra_id: str) -> dict:
+    """
+    Genera un informe de cierre detallado con:
+    - Totales por moneda (ingresos, egresos, saldo)
+    - Desglose por rubro con monto y % sobre total egresos
+    - Separación materiales vs mano de obra
+    - Listado de todos los movimientos
+    - Comparación presupuesto vs ejecutado (si existe presupuesto)
+    """
+    db = get_client()
+
+    # Datos de la obra
+    obra = db.table("obras").select("*").eq("id", obra_id).single().execute()
+    if not obra.data:
+        return {}
+    obra_data = obra.data
+
+    # Todos los movimientos con detalle
+    movs = (
+        db.table("movimientos")
+        .select("tipo, monto, moneda, descripcion, fecha, rubros(nombre), proveedores(nombre), registrado_por")
+        .eq("obra_id", obra_id)
+        .order("fecha", desc=False)
+        .execute()
+    ).data
+
+    from collections import defaultdict
+
+    totales: dict = {}          # {moneda: {ingresos, egresos, saldo}}
+    por_rubro: dict = defaultdict(lambda: defaultdict(float))   # {rubro: {moneda: monto}}
+    materiales: dict = defaultdict(float)   # {moneda: monto}
+    mano_de_obra: dict = defaultdict(float)  # {moneda: monto}
+
+    for m in movs:
+        moneda = m["moneda"]
+        monto = float(m["monto"])
+        tipo = m["tipo"]
+        rubro_data = m.get("rubros")
+        rubro_nombre = rubro_data["nombre"] if rubro_data else "Sin rubro"
+
+        if moneda not in totales:
+            totales[moneda] = {"ingresos": 0.0, "egresos": 0.0}
+
+        if tipo == "ingreso":
+            totales[moneda]["ingresos"] += monto
+        else:
+            totales[moneda]["egresos"] += monto
+            por_rubro[rubro_nombre][moneda] += monto
+
+            # Clasificar materiales vs mano de obra
+            if rubro_nombre.lower() in RUBROS_MANO_DE_OBRA:
+                mano_de_obra[moneda] += monto
+            else:
+                materiales[moneda] += monto
+
+    for moneda, data in totales.items():
+        data["saldo"] = data["ingresos"] - data["egresos"]
+
+    # Calcular porcentaje por rubro sobre total egresos
+    rubros_detalle = []
+    for rubro, monedas in sorted(por_rubro.items()):
+        for moneda, monto in monedas.items():
+            total_egr = totales.get(moneda, {}).get("egresos", 0)
+            pct = round(monto / total_egr * 100, 1) if total_egr > 0 else 0
+            rubros_detalle.append({
+                "rubro": rubro,
+                "moneda": moneda,
+                "monto": monto,
+                "porcentaje": pct,
+            })
+
+    # Presupuesto vs ejecutado
+    presupuesto_total = float(obra_data.get("presupuesto_total") or 0)
+    moneda_presupuesto = obra_data.get("moneda_presupuesto") or "ARS"
+    gastado_presupuesto = totales.get(moneda_presupuesto, {}).get("egresos", 0)
+    desvio_pct = round(
+        (gastado_presupuesto - presupuesto_total) / presupuesto_total * 100, 1
+    ) if presupuesto_total > 0 else None
+
+    return {
+        "obra": {
+            "nombre": obra_data["nombre"],
+            "descripcion": obra_data.get("descripcion", ""),
+            "direccion": obra_data.get("direccion", ""),
+            "fecha_inicio": obra_data.get("fecha_inicio", ""),
+            "fecha_cierre": obra_data.get("fecha_cierre", ""),
+        },
+        "totales": totales,
+        "por_rubro": rubros_detalle,
+        "clasificacion": {
+            "materiales": dict(materiales),
+            "mano_de_obra": dict(mano_de_obra),
+        },
+        "presupuesto": {
+            "presupuesto_total": presupuesto_total,
+            "moneda": moneda_presupuesto,
+            "ejecutado": gastado_presupuesto,
+            "desvio_porcentaje": desvio_pct,
+        } if presupuesto_total > 0 else None,
+        "total_movimientos": len(movs),
+    }
+
+
+def cerrar_obra(obra_id: str) -> dict:
+    """Marca la obra como finalizada con fecha de cierre hoy."""
+    db = get_client()
+    res = db.table("obras").update({
+        "estado": "finalizada",
+        "fecha_cierre": date.today().isoformat(),
+    }).eq("id", obra_id).execute()
+    return res.data[0] if res.data else {}
+
+
+# ──────────────────────────────────────────────
+# CONTACTOS POR OBRA (informe semanal)
+# ──────────────────────────────────────────────
+
+def listar_contactos_obra(obra_id: str, solo_activos: bool = True) -> list[dict]:
+    """Lista los contactos suscritos al informe semanal de una obra."""
+    db = get_client()
+    q = db.table("obra_contactos").select("*").eq("obra_id", obra_id)
+    if solo_activos:
+        q = q.eq("activo", True)
+    return q.execute().data
+
+
+def agregar_contacto_obra(
+    obra_id: str,
+    telefono: str,
+    nombre: str = "",
+    rol: str = "operador",
+) -> dict:
+    """Agrega un contacto para recibir el informe semanal de la obra."""
+    db = get_client()
+    # Normalizar teléfono (quitar whatsapp:)
+    telefono = telefono.replace("whatsapp:", "").strip()
+
+    # Verificar si ya existe
+    existing = (
+        db.table("obra_contactos")
+        .select("id, activo")
+        .eq("obra_id", obra_id)
+        .eq("telefono", telefono)
+        .execute()
+    )
+    if existing.data:
+        # Reactivar si estaba inactivo
+        res = db.table("obra_contactos").update({"activo": True}).eq("id", existing.data[0]["id"]).execute()
+        return res.data[0] if res.data else existing.data[0]
+
+    payload = {"obra_id": obra_id, "telefono": telefono, "rol": rol}
+    if nombre:
+        payload["nombre"] = nombre
+    return db.table("obra_contactos").insert(payload).execute().data[0]
+
+
+def listar_todas_obras_con_contactos() -> list[dict]:
+    """Devuelve todas las obras activas que tienen al menos un contacto activo."""
+    db = get_client()
+    obras = db.table("obras").select("id, nombre").eq("estado", "activa").execute().data
+    resultado = []
+    for obra in obras:
+        contactos = listar_contactos_obra(obra["id"], solo_activos=True)
+        if contactos:
+            resultado.append({"obra": obra, "contactos": contactos})
+    return resultado
+
+
+def generar_resumen_semanal(obra_id: str) -> dict:
+    """Genera un resumen de los movimientos de los últimos 7 días para el informe semanal."""
+    from datetime import timedelta
+    hace_7_dias = (date.today() - timedelta(days=7)).isoformat()
+    hoy = date.today().isoformat()
+
+    informe = generar_informe_financiero(obra_id, fecha_desde=hace_7_dias, fecha_hasta=hoy)
+    presupuesto = obtener_presupuesto_obra(obra_id)
+
+    db = get_client()
+    obra = db.table("obras").select("nombre").eq("id", obra_id).single().execute()
+
+    return {
+        "obra_nombre": obra.data["nombre"] if obra.data else "",
+        "periodo": f"{hace_7_dias} al {hoy}",
+        "movimientos_semana": informe,
+        "presupuesto_acumulado": presupuesto,
+    }
