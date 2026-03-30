@@ -186,21 +186,29 @@ async def health():
 
 
 # ──────────────────────────────────────────────
-# ENDPOINT DE TEST (sin Twilio) — remover en producción
+# ENDPOINT DE TEST (protegido con clave secreta)
 # ──────────────────────────────────────────────
 
 from pydantic import BaseModel
 
+TEST_SECRET = os.environ.get("TEST_SECRET", "")  # Seteá esto en Railway para habilitar el endpoint
+
 class TestMsg(BaseModel):
     telefono: str = "+5491100000000"
     mensaje: str
+    secret: str = ""
 
 @app.post("/test/chat")
 async def test_chat(body: TestMsg):
     """
-    Endpoint temporal para probar el agente sin Twilio.
-    Enviar: {"mensaje": "hola", "telefono": "+5491100000000"}
+    Endpoint para probar el agente sin Twilio.
+    Requiere el campo 'secret' igual a la variable de entorno TEST_SECRET.
+    Si TEST_SECRET está vacío, el endpoint está deshabilitado.
     """
+    if not TEST_SECRET:
+        raise HTTPException(status_code=404, detail="Not found")
+    if body.secret != TEST_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
     try:
         respuesta = agent.procesar_mensaje(body.telefono, body.mensaje)
         return {"ok": True, "respuesta": respuesta}
