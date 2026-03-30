@@ -11,6 +11,8 @@ import hashlib
 import logging
 from urllib.parse import urlencode
 
+import csv
+import io as _io
 import httpx
 from fastapi import FastAPI, Form, Request, Response, HTTPException
 from fastapi.responses import PlainTextResponse
@@ -133,6 +135,50 @@ async def webhook_whatsapp(
 # ──────────────────────────────────────────────
 # ENDPOINT DE SALUD
 # ──────────────────────────────────────────────
+
+@app.get("/export/movimientos")
+async def export_movimientos(
+    obra: str,
+    desde: str = None,
+    hasta: str = None,
+    moneda: str = None,
+):
+    """Exporta movimientos de una obra como CSV descargable."""
+    obra_obj = agent.db.buscar_obra_por_nombre(obra)
+    if not obra_obj:
+        return PlainTextResponse("Obra no encontrada", status_code=404)
+
+    movimientos = agent.db.consultar_movimientos(
+        obra_id=obra_obj["id"],
+        fecha_desde=desde,
+        fecha_hasta=hasta,
+        moneda=moneda if moneda else None,
+        limit=10000,
+    )
+
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Fecha", "Tipo", "Monto", "Moneda", "Descripción", "Rubro", "Proveedor", "Registrado por"])
+    for m in movimientos:
+        writer.writerow([
+            m.get("fecha", ""),
+            m.get("tipo", ""),
+            m.get("monto", ""),
+            m.get("moneda", ""),
+            m.get("descripcion", ""),
+            m.get("rubros", {}).get("nombre", "") if m.get("rubros") else "",
+            m.get("proveedores", {}).get("nombre", "") if m.get("proveedores") else "",
+            m.get("registrado_por", ""),
+        ])
+
+    content = output.getvalue().encode("utf-8-sig")  # BOM para Excel
+    safe_name = obra_obj["nombre"].replace(" ", "_")
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="movimientos_{safe_name}.csv"'},
+    )
+
 
 @app.get("/health")
 async def health():
