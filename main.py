@@ -95,7 +95,11 @@ async def webhook_whatsapp(
     signature = request.headers.get("X-Twilio-Signature", "")
     form_data = await request.form()
     form_dict  = dict(form_data)
+    # Railway corre detrás de un proxy HTTPS; request.url usa http://.
+    # Twilio firma con https://, por eso hay que forzar el esquema correcto.
     url = str(request.url)
+    if url.startswith("http://"):
+        url = "https://" + url[7:]
 
     if TWILIO_AUTH_TOKEN and not validar_firma_twilio(url, form_dict, signature):
         logger.warning(f"Firma Twilio inválida desde {From}")
