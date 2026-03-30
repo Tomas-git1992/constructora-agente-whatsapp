@@ -186,6 +186,30 @@ async def health():
 
 
 # ──────────────────────────────────────────────
+# ENDPOINT DE TEST (sin Twilio) — remover en producción
+# ──────────────────────────────────────────────
+
+from pydantic import BaseModel
+
+class TestMsg(BaseModel):
+    telefono: str = "+5491100000000"
+    mensaje: str
+
+@app.post("/test/chat")
+async def test_chat(body: TestMsg):
+    """
+    Endpoint temporal para probar el agente sin Twilio.
+    Enviar: {"mensaje": "hola", "telefono": "+5491100000000"}
+    """
+    try:
+        respuesta = agent.procesar_mensaje(body.telefono, body.mensaje)
+        return {"ok": True, "respuesta": respuesta}
+    except Exception as e:
+        logger.exception(f"Error en /test/chat: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+# ──────────────────────────────────────────────
 # MODO TEST: enviar mensajes desde la terminal
 # ──────────────────────────────────────────────
 
