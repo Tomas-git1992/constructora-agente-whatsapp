@@ -616,3 +616,56 @@ def generar_resumen_semanal(obra_id: str) -> dict:
         "movimientos_semana": informe,
         "presupuesto_acumulado": presupuesto,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MATERIALES POR COMPROBANTE
+# ──────────────────────────────────────────────────────────────────────────────
+
+def registrar_materiales_compra(
+    movimiento_id: str,
+    obra_id: str,
+    items: list[dict],
+) -> list[dict]:
+    """Inserta los ítems individuales de un comprobante vinculados al movimiento."""
+    db = get_client()
+    filas = []
+    for it in items:
+        fila: dict = {
+            "movimiento_id": movimiento_id,
+            "obra_id": obra_id,
+            "nombre": it.get("nombre", ""),
+        }
+        if it.get("cantidad") is not None:
+            fila["cantidad"] = it["cantidad"]
+        if it.get("unidad"):
+            fila["unidad"] = it["unidad"]
+        if it.get("precio_unitario") is not None:
+            fila["precio_unitario"] = it["precio_unitario"]
+        if it.get("precio_total") is not None:
+            fila["precio_total"] = it["precio_total"]
+        filas.append(fila)
+
+    if not filas:
+        return []
+    return db.table("materiales_compra").insert(filas).execute().data
+
+
+def listar_materiales_compra(
+    obra_id: Optional[str] = None,
+    movimiento_id: Optional[str] = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Lista los materiales comprados, filtrados por obra o por movimiento."""
+    db = get_client()
+    q = (
+        db.table("materiales_compra")
+        .select("*, movimientos(descripcion, fecha, moneda, proveedor_id, proveedores(nombre))")
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    if obra_id:
+        q = q.eq("obra_id", obra_id)
+    if movimiento_id:
+        q = q.eq("movimiento_id", movimiento_id)
+    return q.execute().data
