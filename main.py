@@ -22,6 +22,7 @@ import agent
 # ──────────────────────────────────────────────
 # CONFIGURACIÓN
 # ──────────────────────────────────────────────
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -31,14 +32,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
-TWILIO_ACCOUNT_SID    = os.environ.get("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN     = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_WHATSAPP_FROM  = os.environ.get("TWILIO_WHATSAPP_FROM", "")  # ej: whatsapp:+14155238886
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")  # ej: whatsapp:+14155238886
 
 TWILIO_MESSAGING_URL = (
     f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
 )
-
 
 # ──────────────────────────────────────────────
 # VALIDACIÓN DE FIRMA TWILIO (seguridad)
@@ -93,12 +93,10 @@ async def webhook_whatsapp(
     Webhook que recibe mensajes de WhatsApp desde Twilio.
     Twilio envía un POST con los datos del mensaje como form-data.
     """
-    # Validar firma (opcional en desarrollo)
     signature = request.headers.get("X-Twilio-Signature", "")
     form_data = await request.form()
-    form_dict  = dict(form_data)
-    # Railway corre detrás de un proxy HTTPS; request.url usa http://.
-    # Twilio firma con https://, por eso hay que forzar el esquema correcto.
+    form_dict = dict(form_data)
+
     url = str(request.url)
     if url.startswith("http://"):
         url = "https://" + url[7:]
@@ -107,16 +105,14 @@ async def webhook_whatsapp(
         logger.warning(f"Firma Twilio inválida desde {From}")
         raise HTTPException(status_code=403, detail="Firma inválida")
 
-    # Normalizar número de teléfono (quitar prefijo "whatsapp:")
     telefono = From.replace("whatsapp:", "").strip()
-    mensaje  = Body.strip()
+    mensaje = Body.strip()
 
     if not mensaje:
         return PlainTextResponse("ok")
 
     logger.info(f"Mensaje de {telefono}: {mensaje[:80]}...")
 
-    # Procesar con el agente (puede tardar 2-8 segundos)
     try:
         respuesta = agent.procesar_mensaje(telefono, mensaje)
     except Exception as e:
@@ -125,15 +121,12 @@ async def webhook_whatsapp(
             "Lo siento, hubo un error interno. Por favor intentá de nuevo en unos segundos."
         )
 
-    # Enviar respuesta por WhatsApp
     await enviar_whatsapp(From, respuesta)
-
-    # Twilio espera un 200 OK (el cuerpo puede estar vacío)
     return PlainTextResponse("ok")
 
 
 # ──────────────────────────────────────────────
-# ENDPOINT DE SALUD
+# EXPORT CSV DE MOVIMIENTOS
 # ──────────────────────────────────────────────
 
 @app.get("/export/movimientos")
@@ -171,7 +164,7 @@ async def export_movimientos(
             m.get("registrado_por", ""),
         ])
 
-    content = output.getvalue().encode("utf-8-sig")  # BOM para Excel
+    content = output.getvalue().encode("utf-8-sig")
     safe_name = obra_obj["nombre"].replace(" ", "_")
     return Response(
         content=content,
@@ -179,6 +172,10 @@ async def export_movimientos(
         headers={"Content-Disposition": f'attachment; filename="movimientos_{safe_name}.csv"'},
     )
 
+
+# ──────────────────────────────────────────────
+# ENDPOINT DE SALUD
+# ──────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
@@ -191,19 +188,20 @@ async def health():
 
 from pydantic import BaseModel
 
-TEST_SECRET = os.environ.get("TEST_SECRET", "")  # Seteá esto en Railway para habilitar el endpoint
+TEST_SECRET = os.environ.get("TEST_SECRET", "")
+
 
 class TestMsg(BaseModel):
     telefono: str = "+5491100000000"
     mensaje: str
     secret: str = ""
 
+
 @app.post("/test/chat")
 async def test_chat(body: TestMsg):
     """
     Endpoint para probar el agente sin Twilio.
     Requiere el campo 'secret' igual a la variable de entorno TEST_SECRET.
-    Si TEST_SECRET está vacío, el endpoint está deshabilitado.
     """
     if not TEST_SECRET:
         raise HTTPException(status_code=404, detail="Not found")
@@ -215,6 +213,96 @@ async def test_chat(body: TestMsg):
     except Exception as e:
         logger.exception(f"Error en /test/chat: {e}")
         return {"ok": False, "error": str(e)}
+
+
+# ──────────────────────────────────────────────
+# ENDPOINT INFORME SEMANAL AUTOMÁTICO
+# ──────────────────────────────────────────────
+
+REPORTS_SECRET = os.environ.get("REPORTS_SECRET", "")
+
+
+@app.post("/reports/weekly")
+async def weekly_report(request: Request):
+    """
+    Envía el resumen semanal a todos los contactos suscritos.
+    Llamar cada lunes a las 8am desde una tarea programada.
+    Requiere el header X-Reports-Secret igual a REPORTS_SECRET.
+    """
+    if not REPORTS_SECRET:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    secret = request.headers.get("X-Reports-Secret", "")
+    if secret != REPORTS_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        obras_con_contactos = agent.db.listar_todas_obras_con_contactos()
+    except Exception as e:
+        logger.exception(f"Error obteniendo obras con contactos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    enviados = 0
+    errores = 0
+    detalles = []
+
+    for obra in obras_con_contactos:
+        obra_id = obra.get("id")
+        obra_nombre = obra.get("nombre", "?")
+        contactos = obra.get("obra_contactos", [])
+
+        if not contactos:
+            continue
+
+        try:
+            resumen = agent.db.generar_resumen_semanal(obra_id)
+        except Exception as e:
+            logger.error(f"Error generando resumen para obra {obra_nombre}: {e}")
+            errores += 1
+            detalles.append({"obra": obra_nombre, "error": str(e)})
+            continue
+
+        for contacto in contactos:
+            telefono = contacto.get("telefono", "")
+            if not telefono:
+                continue
+
+            destinatario = (
+                f"whatsapp:{telefono}"
+                if not telefono.startswith("whatsapp:")
+                else telefono
+            )
+
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        TWILIO_MESSAGING_URL,
+                        data={
+                            "From": TWILIO_WHATSAPP_FROM,
+                            "To": destinatario,
+                            "Body": resumen,
+                        },
+                        auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                    )
+                    if response.status_code >= 400:
+                        logger.error(f"Error Twilio enviando a {telefono}: {response.status_code}")
+                        errores += 1
+                        detalles.append({"obra": obra_nombre, "telefono": telefono, "error": response.text})
+                    else:
+                        logger.info(f"Resumen semanal enviado a {telefono} (obra: {obra_nombre})")
+                        enviados += 1
+                        detalles.append({"obra": obra_nombre, "telefono": telefono, "ok": True})
+            except Exception as e:
+                logger.error(f"Error enviando a {telefono}: {e}")
+                errores += 1
+                detalles.append({"obra": obra_nombre, "telefono": telefono, "error": str(e)})
+
+    return {
+        "ok": True,
+        "enviados": enviados,
+        "errores": errores,
+        "detalle": detalles,
+    }
 
 
 # ──────────────────────────────────────────────
