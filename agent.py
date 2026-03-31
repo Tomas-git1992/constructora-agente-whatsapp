@@ -443,6 +443,79 @@ TOOLS = [
             "required": ["nombre_obra"],
         },
     },
+    {
+        "name": "registrar_comprobante_materiales",
+        "description": (
+            "Registra un comprobante de compra de materiales. "
+            "Crea el movimiento de egreso con el total y guarda cada ítem del ticket "
+            "(nombre, cantidad, unidad, precio unitario, precio total) en la tabla de materiales. "
+            "Usar SOLO después de mostrar el resumen al usuario y recibir su confirmación."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre_obra": {
+                    "type": "string",
+                    "description": "Nombre (o parte del nombre) de la obra a la que se asigna el comprobante.",
+                },
+                "proveedor": {
+                    "type": "string",
+                    "description": "Nombre del proveedor / ferretería. Opcional.",
+                },
+                "total": {
+                    "type": "number",
+                    "description": "Monto total del comprobante (siempre positivo).",
+                },
+                "moneda": {
+                    "type": "string",
+                    "enum": ["ARS", "USD", "digital"],
+                    "description": "Moneda del comprobante.",
+                },
+                "fecha": {
+                    "type": "string",
+                    "description": "Fecha del comprobante en formato YYYY-MM-DD. Si no figura, usar hoy.",
+                },
+                "items": {
+                    "type": "array",
+                    "description": "Lista completa de ítems del comprobante.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "nombre":          {"type": "string",  "description": "Nombre del material."},
+                            "cantidad":        {"type": "number",  "description": "Cantidad comprada."},
+                            "unidad":          {"type": "string",  "description": "Unidad: bolsa, m2, m3, kg, litro, unidad, etc."},
+                            "precio_unitario": {"type": "number",  "description": "Precio por unidad."},
+                            "precio_total":    {"type": "number",  "description": "Precio total del ítem."},
+                        },
+                        "required": ["nombre"],
+                    },
+                },
+                "notas": {
+                    "type": "string",
+                    "description": "Notas adicionales sobre el comprobante. Opcional.",
+                },
+            },
+            "required": ["nombre_obra", "total", "moneda", "items"],
+        },
+    },
+    {
+        "name": "listar_materiales_obra",
+        "description": (
+            "Lista todos los materiales comprados para una obra, "
+            "extraídos de comprobantes procesados. "
+            "Muestra nombre, cantidad, unidad y precios por ítem."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre_obra": {
+                    "type": "string",
+                    "description": "Nombre (o parte del nombre) de la obra.",
+                },
+            },
+            "required": ["nombre_obra"],
+        },
+    },
 ]
 
 # ──────────────────────────────────────────────
@@ -888,6 +961,193 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             lineas.append(f"\n_Total: {informe['total_movimientos']} movimientos registrados_")
             return "\n".join(lineas)
 
+        elif nombre == "registrar_comprobante_materiales":
+            obra = db.buscar_obra_por_nombre(params["nombre_obra"])
+            if not obra:
+                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+
+            items    = params.get("items", [])
+            total    = params["total"]
+            moneda   = params["moneda"]
+            proveedor = params.get("proveedor", "")
+            fecha    = params.get("fecha")
+            notas    = params.get("notas", "")
+
+            # Descripción del movimiento
+            items_resumidos = ", ".join(
+                it.get("nombre", "?") for it in items[:4]
+            )
+            if len(items) > 4:
+                items_resumidos += f" y {len(items) - 4} más"
+            descripcion = f"Comprobante materiales: {items_resumidos}"
+            if notas:
+                descripcion += f" — {notas}"
+
+            # Registrar el egreso
+            mov = db.registrar_movimiento(
+                obra_id=obra["id"],
+                tipo="egreso",
+                monto=total,
+                moneda=moneda,
+                descripcion=descripcion,
+                rubro_nombre="Materiales",
+                proveedor_nombre=proveedor or None,
+                fecha=fecha,
+                registrado_por=telefono_usuario or None,
+            )
+
+            # Guardar cada ítem
+            db.registrar_materiales_compra(
+                movimiento_id=mov["id"],
+                obra_id=obra["id"],
+                items=items,
+            )
+
+            moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+            items_list = "\n".join(
+                f"  • {it.get('nombre','?')}"
+                + (f" x {it['cantidad']} {it.get('unidad', '')}" if it.get("cantidad") else "")
+                + (f" — {moneda_sym}{it['precio_total']::.2f}" if it.get("precio_total") else "")
+                for it in items
+            )
+            proveedor_str = f"\nProveedor: {proveedor}" if proveedor else ""
+            return (
+                f"💛Þ⃑ *Comprobante registrado*\n"
+                f"Obra: {obra['nombre']}{proveedor_str}\n"
+                f"Monto total: {moneda_sym} {total:,.2f} {moneda}\n"
+                f"Items registrados:\n{items_list}"
+            )
+
+        elif nombre == "listar_materiales_obra":
+            obra = db.buscar_obra_por_nombre(params["nombre_obra"])
+            if not obra:
+                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+            materiales = db.listar_materiales_compra(obra_id=obra["id"])
+            if not materiales:
+                return f"No hay materiales registrados para {obra['nombre']}."
+            lineas = [f"🔩 *Materiales comprados — {obra['nombre']}*"]
+            for m in materiales:
+                mov_data = m.get("movimientos", {}) or {}
+                moneda = mov_data.get("moneda", "")
+                sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+                cant_str = f" xm['cantidad']} {m.get('unidad','')}" if m.get("cantidad") else ""
+                pu_line = f"  PU: { sym}{m['precio_unitario']:,.2f}" if m.get("precio_unitario") else ""
+                pt_line = f"  Total: {sym}{m['precio_total']:,.2f}" if m.get("precio_total") else ""
+                lineas.append(f"• {m['nombre']}{cant_str}{pu_line}{pt_line}")
+            return "\n".join(lineas)
+
+        elif nombre == "suscribar_informe_semanal":
+            return "Herramienta no implementada aún en esta versión."
+
+        elif nombre == "suscribir_informe_semanal":
+            obra = db.buscar_obra_por_nombre(params["nombre_obra"])
+            if not obra:
+                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+            telefono = params.get("telefono") or telefono_usuario
+            if not telefono:
+                return "❌ No se pudo determinar el número de WhatsApp."
+            contacto = db.agregar_contacto_obra(
+                obra_id=obra["id"],
+                telefono=telefono,
+                nombre=params.get("nombre_contacto", ""),
+                rol=params.get("rol", "operador"),
+            )
+            return (
+                f"✅ *Suscripción registrada*\n"
+                f"Teléfono: {telefono}\n"
+                f"Obra: {obra['nombre']}\n"
+                f"Recibirás el informe semanal cada lunes a las 8am."
+            )
+
+        else:
+            return f"Herramienta desconocida: '{nombre}'."
+
+    except Exception as e:
+        return f"❌ Error: {str(e)}"movimiento(
+                obra_id=obra["id"],
+                tipo="egreso",
+                monto=total,
+                moneda=moneda,
+                descripcion=descripcion,
+                rubro_nombre="Materiales",
+                proveedor_nombre=proveedor or None,
+                fecha=fecha,
+                registrado_por=telefono_usuario,
+            )
+
+            # Registrar cada ítem
+            db.registrar_materiales_compra(mov["id"], obra["id"], items)
+
+            sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+            lineas = [
+                f"✅ *Comprobante registrado — {obra['nombre']}*",
+                f"Proveedor: {proveedor or '—'} | Fecha: {fecha or 'hoy'}",
+                f"Total: {sym} {total:,.2f} {moneda}",
+                "",
+                f"📦 *{len(items)} ítem{'s' if len(items) != 1 else ''} guardado{'s' if len(items) != 1 else ''}:*",
+            ]
+            for it in items:
+                nombre_it  = it.get("nombre", "?")
+                cant       = it.get("cantidad")
+                unidad     = it.get("unidad", "")
+                precio_t   = it.get("precio_total")
+                precio_u   = it.get("precio_unitario")
+                cant_str   = f"{cant} {unidad}".strip() if cant is not None else ""
+                if precio_t is not None:
+                    precio_str = f"{sym} {precio_t:,.2f}"
+                elif precio_u is not None:
+                    precio_str = f"{sym} {precio_u:,.2f}/u"
+                else:
+                    precio_str = ""
+                linea = f"  • {nombre_it}"
+                if cant_str:
+                    linea += f" ({cant_str})"
+                if precio_str:
+                    linea += f": {precio_str}"
+                lineas.append(linea)
+
+            return "\n".join(lineas)
+
+        elif nombre == "listar_materiales_obra":
+            obra = db.buscar_obra_por_nombre(params["nombre_obra"])
+            if not obra:
+                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+            materiales = db.listar_materiales_compra(obra_id=obra["id"])
+            if not materiales:
+                return f"No hay materiales registrados para *{obra['nombre']}*."
+
+            lineas = [f"📦 *Materiales comprados — {obra['nombre']}*\n"]
+            for m in materiales:
+                cant   = m.get("cantidad")
+                unidad = m.get("unidad", "")
+                pt     = m.get("precio_total")
+                pu     = m.get("precio_unitario")
+                fecha_mov = ""
+                moneda_mov = ""
+                if m.get("movimientos"):
+                    fecha_mov  = m["movimientos"].get("fecha", "")
+                    moneda_mov = m["movimientos"].get("moneda", "ARS")
+                sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda_mov, "$")
+
+                cant_str = f"{cant} {unidad}".strip() if cant is not None else ""
+                if pt is not None:
+                    precio_str = f"{sym} {pt:,.2f}"
+                elif pu is not None:
+                    precio_str = f"{sym} {pu:,.2f}/u"
+                else:
+                    precio_str = ""
+
+                linea = f"• *{m['nombre']}*"
+                if cant_str:
+                    linea += f" ({cant_str})"
+                if precio_str:
+                    linea += f": {precio_str}"
+                if fecha_mov:
+                    linea += f"  _{fecha_mov}_"
+                lineas.append(linea)
+
+            return "\n".join(lineas)
+
         elif nombre == "suscribir_informe_semanal":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
@@ -938,6 +1198,8 @@ Podés ayudar con:
 - Definir y controlar el presupuesto total de una obra (con alertas automáticas al 80% y 100%)
 - Cerrar obras y generar un informe de cierre detallado (por rubro, materiales vs mano de obra)
 - Suscribir números a informes semanales automáticos (todos los lunes 8am)
+- Procesar fotos de comprobantes/tickets de compra de materiales: extraer cada ítem con cantidad, unidad, precio unitario y precio total, y registrarlos en la base de datos
+- Listar el historial de materiales comprados por obra (con cantidades y precios)
 
 Reglas importantes:
 1. Siempre respondé en español argentino, de forma amigable y concisa (esto es WhatsApp).
@@ -956,6 +1218,15 @@ Reglas importantes:
     esperá confirmación, y luego cerrá con solo_informe=false.
 11. Para suscribir al informe semanal: el parámetro "telefono" ya viene pre-cargado con el número
     del usuario. Si quiere suscribir a otro número, pedile que lo indique.
+12. Cuando el usuario envía una foto de un comprobante/ticket de compra:
+    a) Analizá la imagen completa y extraé: proveedor, fecha (si figura), y la lista de ítems
+       (nombre del material, cantidad, unidad de medida, precio unitario, precio total).
+    b) Si no reconocés algún campo, omitilo — no inventes datos.
+    c) Mostrá el resumen extraído al usuario con formato claro.
+    d) Preguntá a qué obra asignarlo. Si hay una sola obra activa, usala directamente.
+    e) Confirmá el total y esperá un "sí" o confirmación antes de registrar.
+    f) Al confirmar, llamá a registrar_comprobante_materiales con todos los ítems.
+    g) Si la imagen no es un ticket/comprobante de materiales, informalo amablemente.
 """
 
 
@@ -1032,5 +1303,83 @@ def procesar_mensaje(telefono: str, mensaje_usuario: str) -> str:
             break
 
     respuesta_fallback = "Hubo un problema procesando tu mensaje. Por favor intentá de nuevo."
+    db.guardar_mensaje(telefono, "assistant", respuesta_fallback)
+    return respuesta_fallback
+
+
+def procesar_mensaje_con_imagen(
+    telefono: str,
+    mensaje_usuario: str,
+    imagen_base64: str,
+    imagen_media_type: str,
+) -> str:
+    """
+    Procesa un mensaje de WhatsApp que incluye una imagen (comprobante de compra).
+    Construye un mensaje multimodal con la imagen y el texto, luego corre el mismo
+    bucle agéntico que procesar_mensaje.
+    """
+    # Guardar el texto del usuario en historial (sin imagen, para no saturar la BD)
+    db.guardar_mensaje(telefono, "user", mensaje_usuario or "📷 Comprobante de compra")
+
+    # Construir historial previo (últimas 10 interacciones, excluyendo el mensaje actual)
+    historial = db.obtener_historial(telefono, limite=10)
+    # Excluir el último mensaje que acabamos de guardar
+    messages = [{"role": m["rol"], "content": m["contenido"]} for m in historial[:-1]]
+
+    # Construir el mensaje multimodal con imagen + texto
+    contenido_multimodal = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": imagen_media_type,
+                "data": imagen_base64,
+            },
+        },
+        {
+            "type": "text",
+            "text": mensaje_usuario or "Adjunté un comprobante de compra.",
+        },
+    ]
+    messages.append({"role": "user", "content": contenido_multimodal})
+
+    system_prompt = build_system_prompt(telefono)
+
+    # Bucle agéntico (igual que procesar_mensaje)
+    max_iterations = 5
+    for _ in range(max_iterations):
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            system=system_prompt,
+            tools=TOOLS,
+            messages=messages,
+        )
+
+        messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason == "end_turn":
+            texto = " ".join(
+                block.text for block in response.content if hasattr(block, "text")
+            )
+            db.guardar_mensaje(telefono, "assistant", texto)
+            return texto
+
+        elif response.stop_reason == "tool_use":
+            resultados_tools = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    resultado = ejecutar_herramienta(block.name, block.input, telefono_usuario=telefono)
+                    resultados_tools.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": resultado,
+                    })
+            messages.append({"role": "user", "content": resultados_tools})
+
+        else:
+            break
+
+    respuesta_fallback = "Hubo un problema procesando la imagen. Por favor intentá de nuevo."
     db.guardar_mensaje(telefono, "assistant", respuesta_fallback)
     return respuesta_fallback
