@@ -107,7 +107,7 @@ def generar_informe_financiero(
 def buscar_obra_por_nombre(nombre: str) -> Optional[dict]:
     """Búsqueda flexible: devuelve la primera obra cuyo nombre contenga el texto."""
     db = get_client()
-  2 res = db.table("obras").select("*").ilike("nombre", f"%{nombre}%").limit(1).execute()
+    res = db.table("obras").select("*").ilike("nombre", f"%{nombre}%").limit(1).execute()
     return res.data[0] if res.data else None
 
 
