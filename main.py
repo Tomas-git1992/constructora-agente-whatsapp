@@ -1,53 +1,51 @@
 """
 main.py
-Servidor FastAPI — Webhook para WhatsApp via Twilio.
-Recibe mensajes de WhatsApp, los procesa con el agente Claude
-y responde al usuario.
+Servidor FastAPI â Webhook para WhatsApp via Twilio.
+Recibe mensajes de WhatsApp, los procesa con el agente Claude y responde al usuario.
 """
-
 import os
 import hmac
 import hashlib
 import logging
+import re as _re
+from pathlib import Path as _Path
 from urllib.parse import urlencode
-
 import csv
 import io as _io
 import httpx
 from fastapi import FastAPI, Form, Request, Response, HTTPException
-from fastapi.responses import PlainTextResponse
-
+from fastapi.responses import PlainTextResponse, FileResponse
 import agent
 
-# ──────────────────────────────────────────────
-# CONFIGURACIÓN
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+# CONFIGURACIÃN
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Agente Financiero Constructora",
-    description="Agente IA integrado a WhatsApp para gestión financiera de obras",
+    description="Agente IA integrado a WhatsApp para gestiÃ³n financiera de obras",
     version="1.0.0",
 )
 
-TWILIO_ACCOUNT_SID    = os.environ.get("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN     = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_WHATSAPP_FROM  = os.environ.get("TWILIO_WHATSAPP_FROM", "")  # ej: whatsapp:+14155238886
+TWILIO_ACCOUNT_SID   = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN    = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")  # ej: whatsapp:+14155238886
 
 TWILIO_MESSAGING_URL = (
     f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
 )
 
-
-# ──────────────────────────────────────────────
-# VALIDACIÓN DE FIRMA TWILIO (seguridad)
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+# VALIDACIÃN DE FIRMA TWILIO (seguridad)
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 def validar_firma_twilio(request_url: str, form_data: dict, signature: str) -> bool:
     """Verifica que el webhook venga realmente de Twilio."""
     if not TWILIO_AUTH_TOKEN:
-        return True  # En desarrollo, omitir validación
+        return True  # En desarrollo, omitir validaciÃ³n
     params_str = "".join(f"{k}{v}" for k, v in sorted(form_data.items()))
     string_to_sign = request_url + params_str
     digest = hmac.new(
@@ -59,13 +57,12 @@ def validar_firma_twilio(request_url: str, form_data: dict, signature: str) -> b
     expected = base64.b64encode(digest).decode("utf-8")
     return hmac.compare_digest(expected, signature)
 
-
-# ──────────────────────────────────────────────
-# ENVÍO DE MENSAJES POR WHATSAPP (Twilio)
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+# ENVÃO DE MENSAJES POR WHATSAPP (Twilio)
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 async def enviar_whatsapp(destinatario: str, mensaje: str) -> None:
-    """Envía un mensaje de WhatsApp usando la API REST de Twilio."""
+    """EnvÃ­a un mensaje de WhatsApp usando la API REST de Twilio."""
     async with httpx.AsyncClient() as client:
         response = await client.post(
             TWILIO_MESSAGING_URL,
@@ -77,13 +74,12 @@ async def enviar_whatsapp(destinatario: str, mensaje: str) -> None:
         else:
             logger.info(f"Mensaje enviado a {destinatario}: {response.status_code}")
 
-
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 # WEBHOOK PRINCIPAL
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 async def descargar_imagen_twilio(url: str) -> tuple[bytes, str]:
-    """Descarga una imagen desde la URL de Twilio (requiere autenticación básica)."""
+    """Descarga una imagen desde la URL de Twilio (requiere autenticaciÃ³n bÃ¡sica)."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             url,
@@ -98,85 +94,86 @@ async def descargar_imagen_twilio(url: str) -> tuple[bytes, str]:
 @app.post("/webhook/whatsapp", response_class=PlainTextResponse)
 async def webhook_whatsapp(
     request: Request,
-    From: str = Form(...),
-    Body: str = Form(default=""),
-    NumMedia: str = Form(default="0"),
-    MediaUrl0: str = Form(default=""),
-    MediaContentType0: str = Form(default=""),
+    From:               str = Form(...),
+    Body:               str = Form(default=""),
+    NumMedia:           str = Form(default="0"),
+    MediaUrl0:          str = Form(default=""),
+    MediaContentType0:  str = Form(default=""),
 ):
     """
     Webhook que recibe mensajes de WhatsApp desde Twilio.
-    Twilio envía un POST con los datos del mensaje como form-data.
-    Soporta mensajes de texto e imágenes (comprobantes de compra).
+    Twilio envÃ­a un POST con los datos del mensaje como form-data.
+    Soporta mensajes de texto e imÃ¡genes (comprobantes de compra).
     """
     # Validar firma (opcional en desarrollo)
     signature = request.headers.get("X-Twilio-Signature", "")
     form_data = await request.form()
-    form_dict  = dict(form_data)
-    # Railway corre detrás de un proxy HTTPS; request.url usa http://.
+    form_dict = dict(form_data)
+
+    # Railway corre detrÃ¡s de un proxy HTTPS; request.url usa http://.
     # Twilio firma con https://, por eso hay que forzar el esquema correcto.
     url = str(request.url)
     if url.startswith("http://"):
         url = "https://" + url[7:]
 
     if TWILIO_AUTH_TOKEN and not validar_firma_twilio(url, form_dict, signature):
-        logger.warning(f"Firma Twilio inválida desde {From}")
-        raise HTTPException(status_code=403, detail="Firma inválida")
+        logger.warning(f"Firma Twilio invÃ¡lida desde {From}")
+        raise HTTPException(status_code=403, detail="Firma invÃ¡lida")
 
-    # Normalizar número de teléfono (quitar prefijo "whatsapp:")
+    # Normalizar nÃºmero de telÃ©fono (quitar prefijo "whatsapp:")
     telefono = From.replace("whatsapp:", "").strip()
     mensaje  = Body.strip()
 
-    # ── Caso 1: imagen adjunta (comprobante de materiales) ──────────────────
+    # ââ Caso 1: imagen adjunta (comprobante de materiales) ââââââââââââââââ
     tiene_imagen = (
         int(NumMedia) > 0
         and MediaUrl0
         and MediaContentType0.startswith("image/")
     )
+
     if tiene_imagen:
         logger.info(f"Imagen recibida de {telefono}: {MediaContentType0}")
         try:
             import base64
             imagen_bytes, content_type = await descargar_imagen_twilio(MediaUrl0)
             imagen_base64 = base64.b64encode(imagen_bytes).decode("utf-8")
-            texto = mensaje or "Adjunté un comprobante de compra."
+            texto   = mensaje or "AdjuntÃ© un comprobante de compra."
             respuesta = agent.procesar_mensaje_con_imagen(
                 telefono, texto, imagen_base64, content_type
             )
         except Exception as e:
             logger.exception(f"Error procesando imagen de {telefono}: {e}")
-            respuesta = "Hubo un error procesando la imagen. ¿Podés intentar enviarla de nuevo?"
+            respuesta = "Hubo un error procesando la imagen. Â¿PodÃ©s intentar enviarla de nuevo?"
 
-    # ── Caso 2: mensaje de texto normal ─────────────────────────────────────
+    # ââ Caso 2: mensaje de texto normal âââââââââââââââââââââââââââââââââââ
     elif mensaje:
         logger.info(f"Mensaje de {telefono}: {mensaje[:80]}...")
         try:
             respuesta = agent.procesar_mensaje(telefono, mensaje)
         except Exception as e:
             logger.exception(f"Error procesando mensaje de {telefono}: {e}")
-            respuesta = "Lo siento, hubo un error interno. Por favor intentá de nuevo en unos segundos."
+            respuesta = "Lo siento, hubo un error interno. Por favor intentÃ¡ de nuevo en unos segundos."
 
-    # ── Caso 3: ni texto ni imagen (ej: sticker, audio) ─────────────────────
+    # ââ Caso 3: ni texto ni imagen (ej: sticker, audio) âââââââââââââââââââ
     else:
         return PlainTextResponse("ok")
 
     # Enviar respuesta por WhatsApp
     await enviar_whatsapp(From, respuesta)
 
-    # Twilio espera un 200 OK (el cuerpo puede estar vacío)
+    # Twilio espera un 200 OK (el cuerpo puede estar vacÃ­o)
     return PlainTextResponse("ok")
 
-
-# ──────────────────────────────────────────────
-# ENDPOINT DE SALUD
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+# EXPORTAR CSV (endpoint existente)
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.get("/export/movimientos")
 async def export_movimientos(
-    obra: str,
-    desde: str = None,
-    hasta: str = None,
-    moneda: str = None,
+    obra:    str,
+    desde:   str = None,
+    hasta:   str = None,
+    moneda:  str = None,
 ):
     """Exporta movimientos de una obra como CSV descargable."""
     obra_obj = agent.db.buscar_obra_por_nombre(obra)
@@ -193,7 +190,7 @@ async def export_movimientos(
 
     output = _io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Fecha", "Tipo", "Monto", "Moneda", "Descripción", "Rubro", "Proveedor", "Registrado por"])
+    writer.writerow(["Fecha", "Tipo", "Monto", "Moneda", "DescripciÃ³n", "Rubro", "Proveedor", "Registrado por"])
     for m in movimientos:
         writer.writerow([
             m.get("fecha", ""),
@@ -206,7 +203,7 @@ async def export_movimientos(
             m.get("registrado_por", ""),
         ])
 
-    content = output.getvalue().encode("utf-8-sig")  # BOM para Excel
+    content   = output.getvalue().encode("utf-8-sig")  # BOM para Excel
     safe_name = obra_obj["nombre"].replace(" ", "_")
     return Response(
         content=content,
@@ -214,31 +211,60 @@ async def export_movimientos(
         headers={"Content-Disposition": f'attachment; filename="movimientos_{safe_name}.csv"'},
     )
 
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+# REPORTES EXCEL (generados por el agente)
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+
+_REPORTES_DIR = _Path("/tmp/reportes")
+_REPORTES_DIR.mkdir(exist_ok=True)
+
+
+@app.get("/reporte/{token}")
+async def descargar_reporte(token: str):
+    """
+    Sirve un archivo Excel generado por el agente.
+    El token es un hex de 16 caracteres generado por reporte.py.
+    """
+    if not _re.match(r"^[a-f0-9]{16}$", token):
+        raise HTTPException(status_code=400, detail="Token invÃ¡lido")
+    filepath = _REPORTES_DIR / f"{token}.xlsx"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Reporte no encontrado o expirado")
+    return FileResponse(
+        path=str(filepath),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"reporte_financiero_{token[:8]}.xlsx",
+    )
+
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+# ENDPOINT DE SALUD
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "Agente Financiero Constructora"}
 
-
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 # ENDPOINT DE TEST (protegido con clave secreta)
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 from pydantic import BaseModel
 
-TEST_SECRET = os.environ.get("TEST_SECRET", "")  # Seteá esto en Railway para habilitar el endpoint
+TEST_SECRET = os.environ.get("TEST_SECRET", "")  # SeteÃ¡ esto en Railway para habilitar el endpoint
+
 
 class TestMsg(BaseModel):
     telefono: str = "+5491100000000"
-    mensaje: str
-    secret: str = ""
+    mensaje:  str
+    secret:   str = ""
+
 
 @app.post("/test/chat")
 async def test_chat(body: TestMsg):
     """
     Endpoint para probar el agente sin Twilio.
     Requiere el campo 'secret' igual a la variable de entorno TEST_SECRET.
-    Si TEST_SECRET está vacío, el endpoint está deshabilitado.
+    Si TEST_SECRET estÃ¡ vacÃ­o, el endpoint estÃ¡ deshabilitado.
     """
     if not TEST_SECRET:
         raise HTTPException(status_code=404, detail="Not found")
@@ -251,10 +277,9 @@ async def test_chat(body: TestMsg):
         logger.exception(f"Error en /test/chat: {e}")
         return {"ok": False, "error": str(e)}
 
-
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 # MODO TEST: enviar mensajes desde la terminal
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 if __name__ == "__main__":
     import sys
@@ -262,7 +287,7 @@ if __name__ == "__main__":
     telefono_test = "+5491100000000"
     print("=== MODO TEST ===")
     print(f"Simulando usuario: {telefono_test}")
-    print("Escribí 'salir' para terminar.\n")
+    print("EscribÃ­ 'salir' para terminar.\n")
 
     while True:
         try:
