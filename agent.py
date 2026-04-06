@@ -1,6 +1,6 @@
 """
 agent.py
-Agente Claude con herramientas (tool use) para gestión financiera de obras.
+Agente Claude con herramientas (tool use) para gestiÃ³n financiera de obras.
 """
 
 import json
@@ -9,18 +9,19 @@ from typing import Optional
 
 import anthropic
 import database as db
+import reporte
 
-# ──────────────────────────────────────────────
-# DEFINICIÓN DE HERRAMIENTAS (TOOLS)
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+# DEFINICIÃN DE HERRAMIENTAS (TOOLS)
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 TOOLS = [
     {
         "name": "listar_obras",
         "description": (
-            "Lista las obras (proyectos de construcción) disponibles. "
-            "Usá esta herramienta cuando el usuario pregunte qué obras existen o "
-            "antes de cualquier operación que requiera conocer el ID de una obra."
+            "Lista las obras (proyectos de construcciÃ³n) disponibles. "
+            "UsÃ¡ esta herramienta cuando el usuario pregunte quÃ© obras existen o "
+            "antes de cualquier operaciÃ³n que requiera conocer el ID de una obra."
         ),
         "input_schema": {
             "type": "object",
@@ -36,7 +37,7 @@ TOOLS = [
         "name": "registrar_movimiento",
         "description": (
             "Registra un ingreso o egreso (gasto) en la caja de una obra. "
-            "Siempre confirmá el nombre de la obra con el usuario antes de registrar."
+            "Siempre confirmÃ¡ el nombre de la obra con el usuario antes de registrar."
         ),
         "input_schema": {
             "type": "object",
@@ -57,15 +58,15 @@ TOOLS = [
                 "moneda": {
                     "type": "string",
                     "enum": ["ARS", "USD", "digital"],
-                    "description": "Moneda: ARS (pesos), USD (dólares), digital (transferencia/mercadopago).",
+                    "description": "Moneda: ARS (pesos), USD (dÃ³lares), digital (transferencia/mercadopago).",
                 },
                 "descripcion": {
                     "type": "string",
-                    "description": "Descripción breve del movimiento.",
+                    "description": "DescripciÃ³n breve del movimiento.",
                 },
                 "rubro": {
                     "type": "string",
-                    "description": "Categoría del gasto (ej: Mano de Obra, Materiales, Servicios). Opcional.",
+                    "description": "CategorÃ­a del gasto (ej: Mano de Obra, Materiales, Servicios). Opcional.",
                 },
                 "proveedor": {
                     "type": "string",
@@ -77,11 +78,11 @@ TOOLS = [
                 },
                 "registrado_por": {
                     "type": "string",
-                    "description": "Nombre o teléfono de quien registra. Opcional.",
+                    "description": "Nombre o telÃ©fono de quien registra. Opcional.",
                 },
                 "forzar_registro": {
                     "type": "boolean",
-                    "description": "Si es true, registra aunque exista un duplicado reciente. Usar solo cuando el usuario confirmó explícitamente.",
+                    "description": "Si es true, registra aunque exista un duplicado reciente. Usar solo cuando el usuario confirmÃ³ explÃ­citamente.",
                 },
             },
             "required": ["nombre_obra", "tipo", "monto", "moneda", "descripcion"],
@@ -106,7 +107,7 @@ TOOLS = [
     {
         "name": "listar_movimientos",
         "description": (
-            "Lista los últimos movimientos (ingresos/egresos) de una obra, "
+            "Lista los Ãºltimos movimientos (ingresos/egresos) de una obra, "
             "con filtros opcionales por fecha, tipo, moneda o rubro."
         ),
         "input_schema": {
@@ -136,11 +137,11 @@ TOOLS = [
                 },
                 "rubro": {
                     "type": "string",
-                    "description": "Filtrar por categoría (ej: Materiales). Opcional.",
+                    "description": "Filtrar por categorÃ­a (ej: Materiales). Opcional.",
                 },
                 "cantidad": {
                     "type": "integer",
-                    "description": "Cantidad máxima de resultados. Default: 10.",
+                    "description": "Cantidad mÃ¡xima de resultados. Default: 10.",
                 },
             },
             "required": ["nombre_obra"],
@@ -149,7 +150,7 @@ TOOLS = [
     {
         "name": "registrar_aporte_inversor",
         "description": (
-            "Registra un aporte, retiro, préstamo o devolución de un inversor en una obra. "
+            "Registra un aporte, retiro, prÃ©stamo o devoluciÃ³n de un inversor en una obra. "
             "Mantiene la cuenta corriente de cada inversor por obra."
         ),
         "input_schema": {
@@ -178,7 +179,7 @@ TOOLS = [
                 },
                 "descripcion": {
                     "type": "string",
-                    "description": "Descripción opcional.",
+                    "description": "DescripciÃ³n opcional.",
                 },
                 "fecha": {
                     "type": "string",
@@ -191,7 +192,7 @@ TOOLS = [
     {
         "name": "consultar_cuenta_corriente_inversor",
         "description": (
-            "Consulta la cuenta corriente de un inversor: cuánto aportó, cuánto retiró "
+            "Consulta la cuenta corriente de un inversor: cuÃ¡nto aportÃ³, cuÃ¡nto retirÃ³ "
             "y su saldo neto por obra y moneda."
         ),
         "input_schema": {
@@ -203,7 +204,7 @@ TOOLS = [
                 },
                 "nombre_obra": {
                     "type": "string",
-                    "description": "Filtrar por obra específica. Opcional.",
+                    "description": "Filtrar por obra especÃ­fica. Opcional.",
                 },
             },
             "required": ["nombre_inversor"],
@@ -213,7 +214,7 @@ TOOLS = [
         "name": "registrar_presupuesto",
         "description": (
             "Registra un presupuesto recibido de un proveedor para una obra. "
-            "Permite comparar múltiples presupuestos para el mismo rubro."
+            "Permite comparar mÃºltiples presupuestos para el mismo rubro."
         ),
         "input_schema": {
             "type": "object",
@@ -224,7 +225,7 @@ TOOLS = [
                 },
                 "descripcion": {
                     "type": "string",
-                    "description": "Descripción del trabajo o ítem presupuestado.",
+                    "description": "DescripciÃ³n del trabajo o Ã­tem presupuestado.",
                 },
                 "monto": {"type": "number", "description": "Monto del presupuesto."},
                 "moneda": {
@@ -233,15 +234,15 @@ TOOLS = [
                 },
                 "proveedor": {
                     "type": "string",
-                    "description": "Nombre del proveedor que cotizó.",
+                    "description": "Nombre del proveedor que cotizÃ³.",
                 },
                 "rubro": {
                     "type": "string",
-                    "description": "Categoría del trabajo (ej: Mano de Obra, Materiales).",
+                    "description": "CategorÃ­a del trabajo (ej: Mano de Obra, Materiales).",
                 },
                 "validez_dias": {
                     "type": "integer",
-                    "description": "Días de validez del presupuesto. Opcional.",
+                    "description": "DÃ­as de validez del presupuesto. Opcional.",
                 },
                 "notas": {
                     "type": "string",
@@ -256,7 +257,7 @@ TOOLS = [
         "description": (
             "Genera un informe financiero de una obra con totales por moneda, "
             "desglose de egresos por rubro con porcentajes y comparativas. "
-            "Usá esta herramienta cuando el usuario pida un resumen, informe o reporte."
+            "UsÃ¡ esta herramienta cuando el usuario pida un resumen, informe o reporte."
         ),
         "input_schema": {
             "type": "object",
@@ -310,9 +311,9 @@ TOOLS = [
     {
         "name": "crear_obra",
         "description": (
-            "Crea una nueva obra (proyecto de construcción) en el sistema. "
-            "Usá esta herramienta cuando el usuario quiera dar de alta una obra nueva. "
-            "Pedí confirmación antes de crear si no tenés todos los datos."
+            "Crea una nueva obra (proyecto de construcciÃ³n) en el sistema. "
+            "UsÃ¡ esta herramienta cuando el usuario quiera dar de alta una obra nueva. "
+            "PedÃ­ confirmaciÃ³n antes de crear si no tenÃ©s todos los datos."
         ),
         "input_schema": {
             "type": "object",
@@ -323,11 +324,11 @@ TOOLS = [
                 },
                 "descripcion": {
                     "type": "string",
-                    "description": "Descripción breve de la obra. Opcional.",
+                    "description": "DescripciÃ³n breve de la obra. Opcional.",
                 },
                 "direccion": {
                     "type": "string",
-                    "description": "Dirección física de la obra. Opcional.",
+                    "description": "DirecciÃ³n fÃ­sica de la obra. Opcional.",
                 },
                 "fecha_inicio": {
                     "type": "string",
@@ -352,7 +353,7 @@ TOOLS = [
                 },
                 "rubro": {
                     "type": "string",
-                    "description": "Categoría para comparar (ej: Materiales). Opcional.",
+                    "description": "CategorÃ­a para comparar (ej: Materiales). Opcional.",
                 },
                 "estado": {
                     "type": "string",
@@ -366,7 +367,7 @@ TOOLS = [
         "name": "actualizar_presupuesto",
         "description": (
             "Establece o actualiza el presupuesto total de una obra. "
-            "Usá esta herramienta cuando el usuario quiera definir cuánto se puede gastar en la obra."
+            "UsÃ¡ esta herramienta cuando el usuario quiera definir cuÃ¡nto se puede gastar en la obra."
         ),
         "input_schema": {
             "type": "object",
@@ -392,8 +393,8 @@ TOOLS = [
         "name": "cerrar_obra",
         "description": (
             "Cierra una obra y genera un informe de cierre detallado con desglose por rubro, "
-            "separación entre materiales y mano de obra, y comparación presupuesto vs ejecutado. "
-            "Pedí siempre confirmación del usuario antes de cerrar una obra."
+            "separaciÃ³n entre materiales y mano de obra, y comparaciÃ³n presupuesto vs ejecutado. "
+            "PedÃ­ siempre confirmaciÃ³n del usuario antes de cerrar una obra."
         ),
         "input_schema": {
             "type": "object",
@@ -404,7 +405,7 @@ TOOLS = [
                 },
                 "solo_informe": {
                     "type": "boolean",
-                    "description": "Si es true, genera el informe de cierre SIN cerrar la obra. Útil para previsualizar.",
+                    "description": "Si es true, genera el informe de cierre SIN cerrar la obra. Ãtil para previsualizar.",
                 },
             },
             "required": ["nombre_obra"],
@@ -413,9 +414,9 @@ TOOLS = [
     {
         "name": "suscribir_informe_semanal",
         "description": (
-            "Suscribe un número de WhatsApp para recibir el informe financiero semanal "
+            "Suscribe un nÃºmero de WhatsApp para recibir el informe financiero semanal "
             "de una obra (todos los lunes a las 8am). "
-            "También puede usarse para que el usuario actual se suscriba a sus propias obras."
+            "TambiÃ©n puede usarse para que el usuario actual se suscriba a sus propias obras."
         ),
         "input_schema": {
             "type": "object",
@@ -427,8 +428,8 @@ TOOLS = [
                 "telefono": {
                     "type": "string",
                     "description": (
-                        "Número de WhatsApp a suscribir (con código de país, ej: +5491122334455). "
-                        "Si se omite, se usa el número del usuario que está chateando."
+                        "NÃºmero de WhatsApp a suscribir (con cÃ³digo de paÃ­s, ej: +5491122334455). "
+                        "Si se omite, se usa el nÃºmero del usuario que estÃ¡ chateando."
                     ),
                 },
                 "nombre_contacto": {
@@ -447,9 +448,9 @@ TOOLS = [
         "name": "registrar_comprobante_materiales",
         "description": (
             "Registra un comprobante de compra de materiales. "
-            "Crea el movimiento de egreso con el total y guarda cada ítem del ticket "
+            "Crea el movimiento de egreso con el total y guarda cada Ã­tem del ticket "
             "(nombre, cantidad, unidad, precio unitario, precio total) en la tabla de materiales. "
-            "Usar SOLO después de mostrar el resumen al usuario y recibir su confirmación."
+            "Usar SOLO despuÃ©s de mostrar el resumen al usuario y recibir su confirmaciÃ³n."
         ),
         "input_schema": {
             "type": "object",
@@ -460,7 +461,7 @@ TOOLS = [
                 },
                 "proveedor": {
                     "type": "string",
-                    "description": "Nombre del proveedor / ferretería. Opcional.",
+                    "description": "Nombre del proveedor / ferreterÃ­a. Opcional.",
                 },
                 "total": {
                     "type": "number",
@@ -477,7 +478,7 @@ TOOLS = [
                 },
                 "items": {
                     "type": "array",
-                    "description": "Lista completa de ítems del comprobante.",
+                    "description": "Lista completa de Ã­tems del comprobante.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -485,7 +486,7 @@ TOOLS = [
                             "cantidad":        {"type": "number",  "description": "Cantidad comprada."},
                             "unidad":          {"type": "string",  "description": "Unidad: bolsa, m2, m3, kg, litro, unidad, etc."},
                             "precio_unitario": {"type": "number",  "description": "Precio por unidad."},
-                            "precio_total":    {"type": "number",  "description": "Precio total del ítem."},
+                            "precio_total":    {"type": "number",  "description": "Precio total del Ã­tem."},
                         },
                         "required": ["nombre"],
                     },
@@ -502,8 +503,8 @@ TOOLS = [
         "name": "listar_materiales_obra",
         "description": (
             "Lista todos los materiales comprados para una obra, "
-            "extraídos de comprobantes procesados. "
-            "Muestra nombre, cantidad, unidad y precios por ítem."
+            "extraÃ­dos de comprobantes procesados. "
+            "Muestra nombre, cantidad, unidad y precios por Ã­tem."
         ),
         "input_schema": {
             "type": "object",
@@ -516,11 +517,44 @@ TOOLS = [
             "required": ["nombre_obra"],
         },
     },
+    {
+        "name": "generar_reporte_gastos",
+        "description": (
+            "Genera un reporte Excel completo con TODOS los movimientos, materiales comprados, "
+            "aportes de inversores y anÃ¡lisis econÃ³mico detallado: balance por moneda (pesos/dÃ³lares), "
+            "saldo de cajas, egresos por rubro con porcentaje, top 10 materiales mÃ¡s costosos, "
+            "resumen de inversores y evoluciÃ³n mes a mes. "
+            "Lo envÃ­a al usuario por WhatsApp como archivo adjunto. "
+            "UsÃ¡ esta herramienta cuando el usuario pida un reporte, planilla, resumen detallado, "
+            "anÃ¡lisis de gastos, o quiera exportar la informaciÃ³n a Excel."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "obra_nombre": {
+                    "type": "string",
+                    "description": "Nombre de la obra a reportar. Si no se especifica, incluye todas las obras.",
+                },
+                "fecha_desde": {
+                    "type": "string",
+                    "description": "Fecha de inicio del perÃ­odo (YYYY-MM-DD). Opcional.",
+                },
+                "fecha_hasta": {
+                    "type": "string",
+                    "description": "Fecha de fin del perÃ­odo (YYYY-MM-DD). Opcional.",
+                },
+                "titulo": {
+                    "type": "string",
+                    "description": "TÃ­tulo descriptivo para el reporte. Ej: 'Marzo 2026', 'Obra Centro Q1 2026'.",
+                },
+            },
+        },
+    },
 ]
 
-# ──────────────────────────────────────────────
-# EJECUCIÓN DE HERRAMIENTAS
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
+# EJECUCIÃN DE HERRAMIENTAS
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") -> str:
     """Ejecuta la herramienta solicitada por el agente y devuelve el resultado como string."""
@@ -529,15 +563,15 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             obras = db.listar_obras(params.get("solo_activas", True))
             if not obras:
                 return "No hay obras registradas."
-            lineas = [f"• {o['nombre']} (ID: {o['id']}, Estado: {o['estado']})" for o in obras]
+            lineas = [f"â¢ {o['nombre']} (ID: {o['id']}, Estado: {o['estado']})" for o in obras]
             return "Obras activas:\n" + "\n".join(lineas)
 
         elif nombre == "registrar_movimiento":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré ninguna obra con el nombre '{params['nombre_obra']}'. ¿Podés verificar el nombre?"
+                return f"â No encontrÃ© ninguna obra con el nombre '{params['nombre_obra']}'. Â¿PodÃ©s verificar el nombre?"
 
-            # Detección de duplicados (salvo que el usuario ya confirmó)
+            # DetecciÃ³n de duplicados (salvo que el usuario ya confirmÃ³)
             if not params.get("forzar_registro"):
                 duplicados = db.detectar_duplicado(
                     obra_id=obra["id"],
@@ -549,13 +583,13 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                     dup = duplicados[0]
                     registrado_por = dup.get("registrado_por") or "alguien del equipo"
                     return (
-                        f"⚠️ *Posible duplicado detectado*\n"
+                        f"â ï¸ *Posible duplicado detectado*\n"
                         f"Hay un movimiento similar registrado hace menos de 2 horas:\n"
-                        f"  • {dup['tipo'].capitalize()} de {dup['monto']} {dup['moneda']}\n"
-                        f"  • Concepto: {dup.get('descripcion', '—')}\n"
-                        f"  • Registrado por: {registrado_por}\n\n"
-                        f"¿Es un movimiento nuevo o es el mismo? "
-                        f"Respondé *'sí, registralo igual'* para confirmarlo."
+                        f"  â¢ {dup['tipo'].capitalize()} de {dup['monto']} {dup['moneda']}\n"
+                        f"  â¢ Concepto: {dup.get('descripcion', 'â')}\n"
+                        f"  â¢ Registrado por: {registrado_por}\n\n"
+                        f"Â¿Es un movimiento nuevo o es el mismo? "
+                        f"RespondÃ© *'sÃ­, registralo igual'* para confirmarlo."
                     )
 
             resultado = db.registrar_movimiento(
@@ -569,8 +603,8 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 fecha=params.get("fecha"),
                 registrado_por=params.get("registrado_por"),
             )
-            tipo_str = "✅ Ingreso" if params["tipo"] == "ingreso" else "💸 Egreso"
-            moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(params["moneda"], "")
+            tipo_str = "â Ingreso" if params["tipo"] == "ingreso" else "ð¸ Egreso"
+            moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(params["moneda"], "")
             msg = (
                 f"{tipo_str} registrado en *{obra['nombre']}*\n"
                 f"Monto: {moneda_sym} {params['monto']:,.2f} {params['moneda']}\n"
@@ -587,17 +621,17 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                         sym = {"ARS": "$", "USD": "U$S"}.get(ppto["moneda"], "")
                         if pct >= 100:
                             msg += (
-                                f"\n\n🚨 *PRESUPUESTO SUPERADO*\n"
+                                f"\n\nð¨ *PRESUPUESTO SUPERADO*\n"
                                 f"Ejecutado: {sym} {ppto['gastado']:,.0f} de {sym} {ppto['presupuesto_total']:,.0f} "
                                 f"({pct}%)"
                             )
                         elif pct >= 80:
                             msg += (
-                                f"\n\n⚠️ *Alerta presupuesto: {pct}% ejecutado*\n"
+                                f"\n\nâ ï¸ *Alerta presupuesto: {pct}% ejecutado*\n"
                                 f"Disponible: {sym} {ppto['disponible']:,.0f} {ppto['moneda']}"
                             )
                 except Exception:
-                    pass  # No interrumpir el flujo si falla la verificación
+                    pass  # No interrumpir el flujo si falla la verificaciÃ³n
 
             return msg
 
@@ -607,7 +641,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             if params.get("nombre_obra"):
                 obra = db.buscar_obra_por_nombre(params["nombre_obra"])
                 if not obra:
-                    return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                    return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
                 obra_id = obra["id"]
                 obra_nombre = obra["nombre"]
 
@@ -615,9 +649,9 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             if not saldos:
                 return f"No hay movimientos registrados para {obra_nombre}."
 
-            lineas = [f"💰 *Saldo de caja — {obra_nombre}*\n"]
+            lineas = [f"ð° *Saldo de caja â {obra_nombre}*\n"]
             for s in saldos:
-                moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(s["moneda"], "")
+                moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(s["moneda"], "")
                 lineas.append(
                     f"*{s['moneda']}*\n"
                     f"  Ingresos:  {moneda_sym} {s['total_ingresos']:,.2f}\n"
@@ -629,7 +663,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "listar_movimientos":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
             movs = db.consultar_movimientos(
                 obra_id=obra["id"],
                 tipo=params.get("tipo"),
@@ -640,14 +674,14 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 limit=params.get("cantidad", 10),
             )
             if not movs:
-                return f"No encontré movimientos con esos filtros en *{obra['nombre']}*."
-            lineas = [f"📋 *Últimos movimientos — {obra['nombre']}*\n"]
+                return f"No encontrÃ© movimientos con esos filtros en *{obra['nombre']}*."
+            lineas = [f"ð *Ãltimos movimientos â {obra['nombre']}*\n"]
             for m in movs:
-                emoji = "⬆️" if m["tipo"] == "ingreso" else "⬇️"
-                moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(m["moneda"], "")
-                rubro_str = f" [{m['rubros']['nombre']}]" if m.get("rubros") else ""
+                emoji = "â¬ï¸" if m["tipo"] == "ingreso" else "â¬ï¸"
+                moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(m["moneda"], "")
+                rubro_str = f" [{m['rubros']}"]" if m.get("rubros") else ""
                 lineas.append(
-                    f"{emoji} {m['fecha']} — {moneda_sym} {m['monto']:,.2f} {m['moneda']}{rubro_str}\n"
+                    f"{emoji} {m['fecha']} â {moneda_sym} {m['monto']:,.2f} {m['moneda']}{rubro_str}\n"
                     f"   {m['descripcion']}"
                 )
             return "\n".join(lineas)
@@ -655,7 +689,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "registrar_aporte_inversor":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
 
             inversor = db.buscar_inversor_por_nombre(params["nombre_inversor"])
             if not inversor:
@@ -670,8 +704,8 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 descripcion=params.get("descripcion", ""),
                 fecha=params.get("fecha"),
             )
-            tipo_emoji = {"aporte": "💼", "retiro": "💸", "prestamo": "🤝", "devolucion": "↩️"}.get(params["tipo"], "•")
-            moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(params["moneda"], "")
+            tipo_emoji = {"aporte": "ð¼", "retiro": "ð¸", "prestamo": "ð¤", "devolucion": "â©ï¸"}.get(params["tipo"], "â¢")
+            moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(params["moneda"], "")
             return (
                 f"{tipo_emoji} *{params['tipo'].capitalize()}* registrado\n"
                 f"Inversor: {inversor['nombre']}\n"
@@ -683,7 +717,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "consultar_cuenta_corriente_inversor":
             inversor = db.buscar_inversor_por_nombre(params["nombre_inversor"])
             if not inversor:
-                return f"❌ No encontré ningún inversor con el nombre '{params['nombre_inversor']}'."
+                return f"â No encontrÃ© ningÃºn inversor con el nombre '{params['nombre_inversor']}'."
             obra_id = None
             if params.get("nombre_obra"):
                 obra = db.buscar_obra_por_nombre(params["nombre_obra"])
@@ -696,9 +730,9 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             if not registros:
                 return f"No hay movimientos registrados para *{inversor['nombre']}*."
 
-            lineas = [f"📊 *Cuenta corriente — {inversor['nombre']}*\n"]
+            lineas = [f"ð *Cuenta corriente â {inversor['nombre']}*\n"]
             for r in registros:
-                moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(r["moneda"], "")
+                moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(r["moneda"], "")
                 lineas.append(
                     f"*{r['obra']}* ({r['moneda']})\n"
                     f"  Aportes:  {moneda_sym} {r['total_aportes']:,.2f}\n"
@@ -712,8 +746,8 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             obra_existente = db.buscar_obra_por_nombre(params["nombre"])
             if obra_existente:
                 return (
-                    f"⚠️ Ya existe una obra llamada *{obra_existente['nombre']}* "
-                    f"(estado: {obra_existente['estado']}). ¿Querés crear una con nombre diferente?"
+                    f"â ï¸ Ya existe una obra llamada *{obra_existente['nombre']}* "
+                    f"(estado: {obra_existente['estado']}). Â¿QuerÃ©s crear una con nombre diferente?"
                 )
             nueva_obra = db.crear_obra(
                 nombre=params["nombre"],
@@ -722,16 +756,91 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 fecha_inicio=params.get("fecha_inicio", date.today().isoformat()),
             )
             return (
-                f"🏗️ *Obra creada exitosamente*\n"
+                f"ðï¸ *Obra crea     f"{emoji} {m['fecha']} â {moneda_sym} {m['monto']:,.2f} {m['moneda']}{rubro_str}\n"
+                    f"   {m['descripcion']}"
+                )
+            return "\n".join(lineas)
+
+        elif nombre == "registrar_aporte_inversor":
+            obra = db.buscar_obra_por_nombre(params["nombre_obra"])
+            if not obra:
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
+
+            inversor = db.buscar_inversor_por_nombre(params["nombre_inversor"])
+            if not inversor:
+                inversor = db.crear_inversor(params["nombre_inversor"])
+
+            resultado = db.registrar_aporte(
+                obra_id=obra["id"],
+                inversor_id=inversor["id"],
+                monto=params["monto"],
+                moneda=params["moneda"],
+                tipo=params["tipo"],
+                descripcion=params.get("descripcion", ""),
+                fecha=params.get("fecha"),
+            )
+            tipo_emoji = {"aporte": "ð¼", "retiro": "ð¸", "prestamo": "ð¤", "devolucion": "â©ï¸"}.get(params["tipo"], "â¢")
+            moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(params["moneda"], "")
+            return (
+                f"{tipo_emoji} *{params['tipo'].capitalize()}* registrado\n"
+                f"Inversor: {inversor['nombre']}\n"
+                f"Obra: {obra['nombre']}\n"
+                f"Monto: {moneda_sym} {params['monto']:,.2f} {params['moneda']}\n"
+                f"Fecha: {resultado.get('fecha', 'hoy')}"
+            )
+
+        elif nombre == "consultar_cuenta_corriente_inversor":
+            inversor = db.buscar_inversor_por_nombre(params["nombre_inversor"])
+            if not inversor:
+                return f"â No encontrÃ© ningÃºn inversor con el nombre '{params['nombre_inversor']}'."
+            obra_id = None
+            if params.get("nombre_obra"):
+                obra = db.buscar_obra_por_nombre(params["nombre_obra"])
+                if obra:
+                    obra_id = obra["id"]
+
+            registros = db.consultar_cuenta_corriente(
+                inversor_id=inversor["id"], obra_id=obra_id
+            )
+            if not registros:
+                return f"No hay movimientos registrados para *{inversor['nombre']}*."
+
+            lineas = [f"ð *Cuenta corriente â {inversor['nombre']}*\n"]
+            for r in registros:
+                moneda_sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(r["moneda"], "")
+                lineas.append(
+                    f"*{r['obra']}* ({r['moneda']})\n"
+                    f"  Aportes:  {moneda_sym} {r['total_aportes']:,.2f}\n"
+                    f"  Retiros:  {moneda_sym} {r['total_retiros']:,.2f}\n"
+                    f"  *Saldo:   {moneda_sym} {r['saldo_neto']:,.2f}*"
+                )
+            return "\n\n".join(lineas)
+
+        elif nombre == "crear_obra":
+            from datetime import date
+            obra_existente = db.buscar_obra_por_nombre(params["nombre"])
+            if obra_existente:
+                return (
+                    f"â ï¸ Ya existe una obra llamada *{obra_existente['nombre']}* "
+                    f"(estado: {obra_existente['estado']}). Â¿QuerÃ©s crear una con nombre diferente?"
+                )
+            nueva_obra = db.crear_obra(
+                nombre=params["nombre"],
+                descripcion=params.get("descripcion", ""),
+                direccion=params.get("direccion", ""),
+                fecha_inicio=params.get("fecha_inicio", date.today().isoformat()),
+            )
+            return (
+                f"ðï¸ *Obra creada exitosamente*\n"
                 f"Nombre: {nueva_obra['nombre']}\n"
-                f"Dirección: {nueva_obra.get('direccion') or 'No indicada'}\n"
+                f"DirecciÃ³n: {nueva_obra.get('direccion') or 'No indicada'}\n"
                 f"Estado: {nueva_obra.get('estado', 'activa')}"
             )
 
         elif nombre == "registrar_presupuesto":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
             resultado = db.registrar_presupuesto(
                 obra_id=obra["id"],
                 descripcion=params["descripcion"],
@@ -744,7 +853,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             )
             moneda_sym = {"ARS": "$", "USD": "U$S"}.get(params["moneda"], "")
             return (
-                f"📝 *Presupuesto registrado*\n"
+                f"ð *Presupuesto registrado*\n"
                 f"Obra: {obra['nombre']}\n"
                 f"Concepto: {params['descripcion']}\n"
                 f"Proveedor: {params.get('proveedor', 'No indicado')}\n"
@@ -764,16 +873,16 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 estado=params.get("estado"),
             )
             if not presupuestos:
-                return "No encontré presupuestos con esos filtros."
+                return "No encontrÃ© presupuestos con esos filtros."
 
-            lineas = ["🔍 *Comparación de presupuestos* (orden: menor a mayor)\n"]
+            lineas = ["ð *ComparaciÃ³n de presupuestos* (orden: menor a mayor)\n"]
             for i, p in enumerate(presupuestos, 1):
                 moneda_sym = {"ARS": "$", "USD": "U$S"}.get(p["moneda"], "")
                 prov_str = p["proveedores"]["nombre"] if p.get("proveedores") else "Sin proveedor"
                 obra_str = p["obras"]["nombre"] if p.get("obras") else ""
                 rubro_str = p["rubros"]["nombre"] if p.get("rubros") else ""
                 lineas.append(
-                    f"{i}. *{moneda_sym} {p['monto']:,.2f}* — {prov_str}\n"
+                    f"{i}. *{moneda_sym} {p['monto']:,.2f}* â {prov_str}\n"
                     f"   {p['descripcion']}\n"
                     f"   Obra: {obra_str} | Rubro: {rubro_str} | Estado: {p['estado']}"
                 )
@@ -782,7 +891,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "generar_informe":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
             informe = db.generar_informe_financiero(
                 obra_id=obra["id"],
                 fecha_desde=params.get("fecha_desde"),
@@ -791,17 +900,17 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             if informe["total_movimientos"] == 0:
                 return f"No hay movimientos registrados en *{obra['nombre']}*."
 
-            lineas = [f"📊 *Informe financiero — {obra['nombre']}*"]
+            lineas = [f"ð *Informe financiero â {obra['nombre']}*"]
             periodo = ""
             if informe.get("fecha_desde") or informe.get("fecha_hasta"):
                 desde = informe.get("fecha_desde", "inicio")
                 hasta = informe.get("fecha_hasta", "hoy")
-                periodo = f" ({desde} → {hasta})"
+                periodo = f" ({desde} â {hasta})"
             lineas[0] += periodo + "\n"
 
             # Totales por moneda
             for moneda, datos in informe["por_moneda"].items():
-                sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+                sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(moneda, "")
                 lineas.append(
                     f"*{moneda}*\n"
                     f"  Ingresos: {sym} {datos['ingresos']:,.2f}\n"
@@ -811,9 +920,9 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
 
             # Desglose de egresos por rubro (con barra visual y porcentaje)
             if informe["por_rubro"]:
-                lineas.append("\n📂 *Egresos por rubro:*")
+                lineas.append("\nð *Egresos por rubro:*")
                 for moneda in informe["por_moneda"]:
-                    sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+                    sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(moneda, "")
                     total_egresos = informe["por_moneda"][moneda]["egresos"]
                     if total_egresos == 0:
                         continue
@@ -828,7 +937,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                         for rubro, monto in rubros_moneda:
                             pct = (monto / total_egresos) * 100
                             barras = int(pct / 10)
-                            barra_str = "█" * barras + "░" * (10 - barras)
+                            barra_str = "â" * barras + "â" * (10 - barras)
                             lineas.append(
                                 f"  {rubro[:18]:<18} {barra_str} {pct:.0f}%\n"
                                 f"  {' '*18} {sym} {monto:,.2f}"
@@ -840,7 +949,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "exportar_movimientos":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
 
             base_url = os.environ.get(
                 "RAILWAY_PUBLIC_DOMAIN",
@@ -862,15 +971,15 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
 
             filtros = []
             if params.get("fecha_desde") or params.get("fecha_hasta"):
-                filtros.append(f"{params.get('fecha_desde','inicio')} → {params.get('fecha_hasta','hoy')}")
+                filtros.append(f"{params.get('fecha_desde','inicio')} â {params.get('fecha_hasta','hoy')}")
             if params.get("moneda"):
                 filtros.append(params["moneda"])
-            filtros_str = " · ".join(filtros) if filtros else "todos los movimientos"
+            filtros_str = " Â· ".join(filtros) if filtros else "todos los movimientos"
 
             return (
-                f"📥 *Exportar movimientos — {obra['nombre']}*\n"
+                f"ð¥ *Exportar movimientos â {obra['nombre']}*\n"
                 f"Filtros: {filtros_str}\n\n"
-                f"Abrí este link desde tu celular o computadora para descargar el CSV:\n"
+                f"AbrÃ­ este link desde tu celular o computadora para descargar el CSV:\n"
                 f"{url}\n\n"
                 f"_El archivo se puede abrir en Excel o Google Sheets._"
             )
@@ -878,14 +987,14 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "actualizar_presupuesto":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
             moneda = params.get("moneda", "ARS")
             db.actualizar_presupuesto_obra(obra["id"], params["presupuesto_total"], moneda)
             sym = {"ARS": "$", "USD": "U$S"}.get(moneda, "")
             # Calcular estado actual vs presupuesto
             ppto = db.obtener_presupuesto_obra(obra["id"])
             return (
-                f"✅ *Presupuesto actualizado — {obra['nombre']}*\n"
+                f"â *Presupuesto actualizado â {obra['nombre']}*\n"
                 f"Presupuesto total: {sym} {params['presupuesto_total']:,.2f} {moneda}\n"
                 f"Gastado hasta ahora: {sym} {ppto.get('gastado', 0):,.2f} ({ppto.get('porcentaje_ejecutado', 0)}%)\n"
                 f"Disponible: {sym} {ppto.get('disponible', params['presupuesto_total']):,.2f}"
@@ -894,11 +1003,11 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "cerrar_obra":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
 
             informe = db.generar_informe_cierre(obra["id"])
             if not informe:
-                return f"❌ No se pudo generar el informe para '{params['nombre_obra']}'."
+                return f"â No se pudo generar el informe para '{params['nombre_obra']}'."
 
             # Solo informe sin cerrar
             solo_informe = params.get("solo_informe", False)
@@ -908,14 +1017,14 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             # Formatear informe
             o = informe["obra"]
             lineas = [
-                f"{'📊' if solo_informe else '🏁'} *{'Informe de cierre' if solo_informe else 'OBRA CERRADA'} — {o['nombre']}*",
-                f"Inicio: {o.get('fecha_inicio', '—')} | Cierre: {o.get('fecha_cierre') or 'hoy'}",
+                f"{'ð' if solo_informe else 'ð'} *{'Informe de cierre' if solo_informe else 'OBRA CERRADA'} â {o['nombre']}*",
+                f"Inicio: {o.get('fecha_inicio', 'â')} | Cierre: {o.get('fecha_cierre') or 'hoy'}",
                 "",
             ]
 
             # Totales
             for moneda, datos in informe["totales"].items():
-                sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+                sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(moneda, "")
                 lineas.append(
                     f"*{moneda}*\n"
                     f"  Ingresos: {sym} {datos['ingresos']:,.0f}\n"
@@ -925,15 +1034,15 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
 
             # Desglose por rubro
             if informe["por_rubro"]:
-                lineas.append("\n📂 *Desglose por rubro:*")
+                lineas.append("\nð *Desglose por rubro:*")
                 for r in informe["por_rubro"]:
-                    sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(r["moneda"], "")
-                    lineas.append(f"  • {r['rubro']}: {sym} {r['monto']:,.0f} ({r['porcentaje']}%)")
+                    sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(r["moneda"], "")
+                    lineas.append(f"  â¢ {r['rubro']}: {sym} {r['monto']:,.0f} ({r['porcentaje']}%)")
 
             # Materiales vs Mano de obra
             clf = informe["clasificacion"]
             if clf["materiales"] or clf["mano_de_obra"]:
-                lineas.append("\n🔨 *Materiales vs Mano de obra:*")
+                lineas.append("\nð¨ *Materiales vs Mano de obra:*")
                 for moneda, monto in clf["materiales"].items():
                     sym = {"ARS": "$", "USD": "U$S"}.get(moneda, "")
                     lineas.append(f"  Materiales ({moneda}): {sym} {monto:,.0f}")
@@ -947,12 +1056,12 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 sym = {"ARS": "$", "USD": "U$S"}.get(p["moneda"], "")
                 desvio = p["desvio_porcentaje"]
                 desvio_str = (
-                    f"✅ {abs(desvio)}% bajo presupuesto" if desvio < 0
-                    else f"⚠️ {desvio}% sobre presupuesto" if desvio > 0
-                    else "✅ Exacto al presupuesto"
-                ) if desvio is not None else "—"
+                    f"â {abs(desvio)}% bajo presupuesto" if desvio < 0
+                    else f"â ï¸ {desvio}% sobre presupuesto" if desvio > 0
+                    else "â Exacto al presupuesto"
+                ) if desvio is not None else "â"
                 lineas.append(
-                    f"\n📋 *Presupuesto vs Ejecutado ({p['moneda']}):*\n"
+                    f"\nð *Presupuesto vs Ejecutado ({p['moneda']}):*\n"
                     f"  Presupuesto: {sym} {p['presupuesto_total']:,.0f}\n"
                     f"  Ejecutado:   {sym} {p['ejecutado']:,.0f}\n"
                     f"  {desvio_str}"
@@ -964,7 +1073,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "registrar_comprobante_materiales":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
 
             items    = params.get("items", [])
             total    = params["total"]
@@ -973,15 +1082,15 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             fecha    = params.get("fecha")
             notas    = params.get("notas", "")
 
-            # Descripción del movimiento
+            # DescripciÃ³n del movimiento
             items_resumidos = ", ".join(
                 it.get("nombre", "?") for it in items[:4]
             )
             if len(items) > 4:
-                items_resumidos += f" y {len(items) - 4} más"
+                items_resumidos += f" y {len(items) - 4} mÃ¡s"
             descripcion = f"Comprobante materiales: {items_resumidos}"
             if notas:
-                descripcion += f" — {notas}"
+                descripcion += f" â {notas}"
 
             # Registrar el egreso
             mov = db.registrar_movimiento(
@@ -996,16 +1105,16 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 registrado_por=telefono_usuario,
             )
 
-            # Registrar cada ítem
+            # Registrar cada Ã­tem
             db.registrar_materiales_compra(mov["id"], obra["id"], items)
 
-            sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda, "")
+            sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(moneda, "")
             lineas = [
-                f"✅ *Comprobante registrado — {obra['nombre']}*",
-                f"Proveedor: {proveedor or '—'} | Fecha: {fecha or 'hoy'}",
+                f"â *Comprobante registrado â {obra['nombre']}*",
+                f"Proveedor: {proveedor or 'â'} | Fecha: {fecha or 'hoy'}",
                 f"Total: {sym} {total:,.2f} {moneda}",
                 "",
-                f"📦 *{len(items)} ítem{'s' if len(items) != 1 else ''} guardado{'s' if len(items) != 1 else ''}:*",
+                f"ð¦ *{len(items)} Ã­tem{'s' if len(items) != 1 else ''} guardado{'s' if len(items) != 1 else ''}:*",
             ]
             for it in items:
                 nombre_it  = it.get("nombre", "?")
@@ -1020,7 +1129,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                     precio_str = f"{sym} {precio_u:,.2f}/u"
                 else:
                     precio_str = ""
-                linea = f"  • {nombre_it}"
+                linea = f"  â¢ {nombre_it}"
                 if cant_str:
                     linea += f" ({cant_str})"
                 if precio_str:
@@ -1032,12 +1141,12 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "listar_materiales_obra":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
             materiales = db.listar_materiales_compra(obra_id=obra["id"])
             if not materiales:
                 return f"No hay materiales registrados para *{obra['nombre']}*."
 
-            lineas = [f"📦 *Materiales comprados — {obra['nombre']}*\n"]
+            lineas = [f"ð¦ *Materiales comprados â {obra['nombre']}*\n"]
             for m in materiales:
                 cant   = m.get("cantidad")
                 unidad = m.get("unidad", "")
@@ -1048,7 +1157,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 if m.get("movimientos"):
                     fecha_mov  = m["movimientos"].get("fecha", "")
                     moneda_mov = m["movimientos"].get("moneda", "ARS")
-                sym = {"ARS": "$", "USD": "U$S", "digital": "🔵"}.get(moneda_mov, "$")
+                sym = {"ARS": "$", "USD": "U$S", "digital": "ðµ"}.get(moneda_mov, "$")
 
                 cant_str = f"{cant} {unidad}".strip() if cant is not None else ""
                 if pt is not None:
@@ -1058,7 +1167,7 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
                 else:
                     precio_str = ""
 
-                linea = f"• *{m['nombre']}*"
+                linea = f"â¢ *{m['nombre']}*"
                 if cant_str:
                     linea += f" ({cant_str})"
                 if precio_str:
@@ -1072,12 +1181,12 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
         elif nombre == "suscribir_informe_semanal":
             obra = db.buscar_obra_por_nombre(params["nombre_obra"])
             if not obra:
-                return f"❌ No encontré la obra '{params['nombre_obra']}'."
+                return f"â No encontrÃ© la obra '{params['nombre_obra']}'."
 
-            # Usar teléfono del usuario actual si no se especifica otro
+            # Usar telÃ©fono del usuario actual si no se especifica otro
             telefono = params.get("telefono", "").strip() or telefono_usuario
             if not telefono:
-                return "❌ No pude obtener el número de teléfono. Por favor indicalo manualmente (ej: +5491122334455)."
+                return "â No pude obtener el nÃºmero de telÃ©fono. Por favor indicalo manualmente (ej: +5491122334455)."
 
             contacto = db.agregar_contacto_obra(
                 obra_id=obra["id"],
@@ -1087,76 +1196,99 @@ def ejecutar_herramienta(nombre: str, params: dict, telefono_usuario: str = "") 
             )
             nombre_str = contacto.get("nombre") or telefono
             return (
-                f"✅ *Suscripción activada*\n"
-                f"*{nombre_str}* recibirá el informe semanal de *{obra['nombre']}*\n"
-                f"Día: Lunes a las 8:00am 📅"
+                f"â *SuscripciÃ³n activada*\n"
+                f"*{nombre_str}* recibirÃ¡ el informe semanal de *{obra['nombre']}*\n"
+                f"DÃ­a: Lunes a las 8:00am ð"
             )
+
+        elif nombre == "generar_reporte_gastos":
+            try:
+                token, url = reporte.generar_reporte_xlsx(
+                    obra_nombre=params.get("obra_nombre"),
+                    fecha_desde=params.get("fecha_desde"),
+                    fecha_hasta=params.get("fecha_hasta"),
+                    titulo=params.get("titulo"),
+                )
+                reporte.enviar_reporte_whatsapp(token, telefono_usuario)
+                return (
+                    "â *Reporte enviado*\n"
+                    "En unos segundos recibÃ­s el archivo Excel con:\n"
+                    "â¢ ð Resumen ejecutivo (balance, rubros, top materiales, inversores)\n"
+                    "â¢ ð Todos los movimientos detallados\n"
+                    "â¢ ð© Materiales comprados por comprobante\n"
+                    "â¢ ð° Aportes de inversores\n"
+                    "â¢ ð EvoluciÃ³n mes a mes"
+                )
+            except RuntimeError as exc:
+                if "openpyxl" in str(exc):
+                    return "â Falta instalar openpyxl en el servidor. ContactÃ¡ al administrador."
+                return f"â No pude generar el reporte: {exc}"
 
         else:
             return f"Herramienta desconocida: {nombre}"
 
     except Exception as e:
-        return f"❌ Error al ejecutar {nombre}: {str(e)}"
+        return f"â Error al ejecutar {nombre}: {str(e)}"
 
 
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 # AGENTE PRINCIPAL
-# ──────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââ
 
 _SYSTEM_PROMPT_BASE = """Sos el asistente financiero de una empresa constructora argentina.
-Tu rol es ayudar al equipo a registrar y consultar información financiera de las obras de forma
-rápida y simple a través de WhatsApp.
+Tu rol es ayudar al equipo a registrar y consultar informaciÃ³n financiera de las obras de forma
+rÃ¡pida y simple a travÃ©s de WhatsApp.
 
-Podés ayudar con:
-- Crear nuevas obras (proyectos de construcción)
-- Registrar ingresos y egresos en la caja de cada obra (en pesos, dólares o medios digitales)
+PodÃ©s ayudar con:
+- Crear nuevas obras (proyectos de construcciÃ³n)
+- Registrar ingresos y egresos en la caja de cada obra (en pesos, dÃ³lares o medios digitales)
 - Consultar saldos y movimientos por obra
 - Registrar aportes y retiros de inversores
 - Ver la cuenta corriente de cada inversor
 - Registrar y comparar presupuestos de proveedores
 - Generar informes financieros con totales por moneda, desglose por rubro y porcentajes
 - Exportar movimientos como CSV descargable (link de descarga para Excel o Google Sheets)
-- Definir y controlar el presupuesto total de una obra (con alertas automáticas al 80% y 100%)
+- Definir y controlar el presupuesto total de una obra (con alertas automÃ¡ticas al 80% y 100%)
 - Cerrar obras y generar un informe de cierre detallado (por rubro, materiales vs mano de obra)
-- Suscribir números a informes semanales automáticos (todos los lunes 8am)
-- Procesar fotos de comprobantes/tickets de compra de materiales: extraer cada ítem con cantidad, unidad, precio unitario y precio total, y registrarlos en la base de datos
+- Suscribir nÃºmeros a informes semanales automÃ¡ticos (todos los lunes 8am)
+- Procesar fotos de comprobantes/tickets de compra de materiales: extraer cada Ã­tem con cantidad, unidad, precio unitario y precio total, y registrarlos en la base de datos
 - Listar el historial de materiales comprados por obra (con cantidades y precios)
 
 Reglas importantes:
-1. Siempre respondé en español argentino, de forma amigable y concisa (esto es WhatsApp).
-2. Cuando el usuario mencione un monto, si no indica la moneda, preguntá si es pesos (ARS),
-   dólares (USD) o digital (transferencia/MercadoPago).
-3. Antes de registrar algo importante (movimiento > $100.000 o > U$S 500), confirmá con el usuario.
-4. Si falta información necesaria, preguntá de forma clara y específica.
-5. Usá emojis con moderación para hacer la lectura más fácil.
-6. Nunca inventes datos que no tenés. Si no encontrás algo en la base de datos, decilo claramente.
+1. Siempre respondÃ© en espaÃ±ol argentino, de forma amigable y concisa (esto es WhatsApp).
+2. Cuando el usuario mencione un monto, si no indica la moneda, preguntÃ¡ si es pesos (ARS),
+   dÃ³lares (USD) o digital (transferencia/MercadoPago).
+3. Antes de registrar algo importante (movimiento > $100.000 o > U$S 500), confirmÃ¡ con el usuario.
+4. Si falta informaciÃ³n necesaria, preguntÃ¡ de forma clara y especÃ­fica.
+5. UsÃ¡ emojis con moderaciÃ³n para hacer la lectura mÃ¡s fÃ¡cil.
+6. Nunca inventes datos que no tenÃ©s. Si no encontrÃ¡s algo en la base de datos, decilo claramente.
 7. Los montos siempre con separador de miles (punto) y dos decimales cuando corresponda.
-8. Las fechas en formato día/mes/año para mostrar al usuario.
-9. Detección de duplicados: si el sistema detecta un movimiento similar reciente, informá al usuario
-   y esperá su confirmación antes de registrar. Si el usuario confirma con "sí registralo" o similar,
-   volvé a llamar registrar_movimiento con forzar_registro=true.
-10. Para cerrar una obra: primero generá el informe (solo_informe=true) para mostrárselo al usuario,
-    esperá confirmación, y luego cerrá con solo_informe=false.
-11. Para suscribir al informe semanal: el parámetro "telefono" ya viene pre-cargado con el número
-    del usuario. Si quiere suscribir a otro número, pedile que lo indique.
-12. Cuando el usuario envía una foto de un comprobante/ticket de compra:
-    a) Analizá la imagen completa y extraé: proveedor, fecha (si figura), y la lista de ítems
+8. Las fechas en formato dÃ­a/mes/aÃ±o para mostrar al usuario.
+9. DetecciÃ³n de duplicados: si el sistema detecta un movimiento similar reciente, informÃ¡ al usuario
+   y esperÃ¡ su confirmaciÃ³n antes de registrar. Si el usuario confirma con "sÃ­ registralo" o similar,
+   volvÃ© a llamar registrar_movimiento con forzar_registro=true.
+10. Para cerrar una obra: primero generÃ¡ el informe (solo_informe=true) para mostrÃ¡rselo al usuario,
+    esperÃ¡ confirmaciÃ³n, y luego cerrÃ¡ con solo_informe=false.
+11. Para suscribir al informe semanal: el parÃ¡metro "telefono" ya viene pre-cargado con el nÃºmero
+    del usuario. Si quiere suscribir a otro nÃºmero, pedile que lo indique.
+12. Cuando el usuario envÃ­a una foto de un comprobante/ticket de compra:
+    a) AnalizÃ¡ la imagen completa y extraÃ©: proveedor, fecha (si figura), y la lista de Ã­tems
        (nombre del material, cantidad, unidad de medida, precio unitario, precio total).
-    b) Si no reconocés algún campo, omitilo — no inventes datos.
-    c) Mostrá el resumen extraído al usuario con formato claro.
-    d) Preguntá a qué obra asignarlo. Si hay una sola obra activa, usala directamente.
-    e) Confirmá el total y esperá un "sí" o confirmación antes de registrar.
-    f) Al confirmar, llamá a registrar_comprobante_materiales con todos los ítems.
+    b) Si no reconocÃ©s algÃºn campo, omitilo â no inventes datos.
+    c) MostrÃ¡ el resumen extraÃ­do al usuario con formato claro.
+    d) PreguntÃ¡ a quÃ© obra asignarlo. Si hay una sola obra activa, usala directamente.
+    e) ConfirmÃ¡ el total y esperÃ¡ un "sÃ­" o confirmaciÃ³n antes de registrar.
+    f) Al confirmar, llamÃ¡ a registrar_comprobante_materiales con todos los Ã­tems.
     g) Si la imagen no es un ticket/comprobante de materiales, informalo amablemente.
 """
 
 
 def build_system_prompt(telefono_usuario: str) -> str:
-    """Construye el system prompt incluyendo el teléfono del usuario actual."""
-    return _SYSTEM_PROMPT_BASE + f"\nEl número de WhatsApp del usuario actual es: {telefono_usuario}\n"
+    """Construye el system prompt incluyendo el telÃ©fono del usuario actual."""
+    return _SYSTEM_PROMPT_BASE + f"\nEl nÃºmero de WhatsApp del usuario actual es: {telefono_usuario}\n"
 
 
-# Mantener compatibilidad con código existente
+# Mantener compatibilidad con cÃ³digo existente
 SYSTEM_PROMPT = _SYSTEM_PROMPT_BASE
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -1165,7 +1297,7 @@ client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 def procesar_mensaje(telefono: str, mensaje_usuario: str) -> str:
     """
     Procesa un mensaje de WhatsApp y devuelve la respuesta del agente.
-    Mantiene el historial de conversación por usuario.
+    Mantiene el historial de conversaciÃ³n por usuario.
     """
     # Guardar mensaje del usuario
     db.guardar_mensaje(telefono, "user", mensaje_usuario)
@@ -1175,12 +1307,12 @@ def procesar_mensaje(telefono: str, mensaje_usuario: str) -> str:
     messages = [{"role": m["rol"], "content": m["contenido"]} for m in historial]
 
     # Si el historial ya incluye el mensaje actual (por el guardado previo), no lo duplicamos
-    # (esto depende de si obtener_historial incluye el último guardado)
-    # Por seguridad, nos aseguramos que el último mensaje sea del usuario
+    # (esto depende de si obtener_historial incluye el Ãºltimo guardado)
+    # Por seguridad, nos aseguramos que el Ãºltimo mensaje sea del usuario
     if not messages or messages[-1]["content"] != mensaje_usuario:
         messages.append({"role": "user", "content": mensaje_usuario})
 
-    # System prompt dinámico con teléfono del usuario (para suscripción a informes)
+    # System prompt dinÃ¡mico con telÃ©fono del usuario (para suscripciÃ³n a informes)
     system_prompt = build_system_prompt(telefono)
 
     # Bucle agentico: el agente puede llamar herramientas varias veces
@@ -1194,7 +1326,7 @@ def procesar_mensaje(telefono: str, mensaje_usuario: str) -> str:
             messages=messages,
         )
 
-        # Añadir respuesta del asistente al historial temporal
+        # AÃ±adir respuesta del asistente al historial temporal
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason == "end_turn":
@@ -1223,7 +1355,7 @@ def procesar_mensaje(telefono: str, mensaje_usuario: str) -> str:
         else:
             break
 
-    respuesta_fallback = "Hubo un problema procesando tu mensaje. Por favor intentá de nuevo."
+    respuesta_fallback = "Hubo un problema procesando tu mensaje. Por favor intentÃ¡ de nuevo."
     db.guardar_mensaje(telefono, "assistant", respuesta_fallback)
     return respuesta_fallback
 
@@ -1237,14 +1369,14 @@ def procesar_mensaje_con_imagen(
     """
     Procesa un mensaje de WhatsApp que incluye una imagen (comprobante de compra).
     Construye un mensaje multimodal con la imagen y el texto, luego corre el mismo
-    bucle agéntico que procesar_mensaje.
+    bucle agÃ©ntico que procesar_mensaje.
     """
     # Guardar el texto del usuario en historial (sin imagen, para no saturar la BD)
-    db.guardar_mensaje(telefono, "user", mensaje_usuario or "📷 Comprobante de compra")
+    db.guardar_mensaje(telefono, "user", mensaje_usuario or "ð· Comprobante de compra")
 
-    # Construir historial previo (últimas 10 interacciones, excluyendo el mensaje actual)
+    # Construir historial previo (Ãºltimas 10 interacciones, excluyendo el mensaje actual)
     historial = db.obtener_historial(telefono, limite=10)
-    # Excluir el último mensaje que acabamos de guardar
+    # Excluir el Ãºltimo mensaje que acabamos de guardar
     messages = [{"role": m["rol"], "content": m["contenido"]} for m in historial[:-1]]
 
     # Construir el mensaje multimodal con imagen + texto
@@ -1259,14 +1391,14 @@ def procesar_mensaje_con_imagen(
         },
         {
             "type": "text",
-            "text": mensaje_usuario or "Adjunté un comprobante de compra.",
+            "text": mensaje_usuario or "AdjuntÃ© un comprobante de compra.",
         },
     ]
     messages.append({"role": "user", "content": contenido_multimodal})
 
     system_prompt = build_system_prompt(telefono)
 
-    # Bucle agéntico (igual que procesar_mensaje)
+    # Bucle agÃ©ntico (igual que procesar_mensaje)
     max_iterations = 5
     for _ in range(max_iterations):
         response = client.messages.create(
@@ -1301,6 +1433,6 @@ def procesar_mensaje_con_imagen(
         else:
             break
 
-    respuesta_fallback = "Hubo un problema procesando la imagen. Por favor intentá de nuevo."
+    respuesta_fallback = "Hubo un problema procesando la imagen. Por favor intentÃ¡ de nuevo."
     db.guardar_mensaje(telefono, "assistant", respuesta_fallback)
     return respuesta_fallback
